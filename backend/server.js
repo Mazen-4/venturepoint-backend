@@ -30,6 +30,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+protectRoutes(app);
+
+
 // ================= ADMIN PASSWORD RESET =================
 app.post("/api/admin/reset-password", authenticateToken, requireRole("superadmin"), (req, res) => {
     const { username, newPassword } = req.body;
@@ -257,7 +260,6 @@ function protectRoutes(app) {
         };
     });
 }
-protectRoutes(app);
 
 // ================== FULL CRUD ROUTES FOR ALL TABLES ==================
 
