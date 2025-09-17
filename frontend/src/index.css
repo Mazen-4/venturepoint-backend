@@ -1,3 +1,28 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+	Global animated gradient background
+	- Colors: Deep Blue (#003366), Emerald Green (#2E8B57), Accent Gold (#D4AF37), Light Gray (#F5F5F5)
+	- Animation: background-position for seamless movement
+	- To adjust colors or speed, edit the gradient stops and animation duration below
+*/
+body {
+	min-height: 100vh;
+	background: transparent !important;
+	position: relative;
+}
+
+@keyframes gradient-shift {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
