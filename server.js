@@ -11,34 +11,8 @@ const jwt = require("jsonwebtoken");
 const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
 
-
-const db = mysql.createPool({
-    host: "148.72.3.185",
-    user: "vp_DBAdmin",
-    password: "Vp_ed#2025%1624*P@s$",
-    database: "venturepoint_db"
-});
-// Alias for clarity
-
-//const pool = db;
-
-// db.connect(err => {
-//     if (err) {
-//         console.error("❌ DB connection failed: ", err);
-//         return;
-//     }
-//     console.log("✅ Connected to MySQL database");
-// });
-
-// Add this before EVERY route
-app.use((req, res, next) => {
-    console.log(`🔍 Route ${req.path} - DB status:`, !!pool);
-    next();
-});
-
-
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://venturepoint.com'],
+    origin: 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -47,20 +21,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
-
-app.get('/api/debug-db', (req, res) => {
-    console.log('DB debug - db exists:', !!pool);
-    if (!pool) {
-        return res.json({ error: 'db not defined' });
-    }
-    
-    pool.query('SELECT 1 as test', (err, results) => {
-        if (err) {
-            return res.json({ error: err.message });
-        }
-        res.json({ success: true, db_works: true, results });
-    });
-});
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -85,6 +45,24 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 }
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+const pool = mysql.createPool({
+    host: "148.72.3.185",
+    user: "vp_DBAdmin",
+    password: "Vp_ed#2025%1624*P@s$",
+    database: "venturepoint_db",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+pool.getConnection((err, connection) => {
+    if (err) {
+        console.error("❌ DB pool connection failed: ", err);
+        return;
+    }
+    console.log("✅ Connected to MySQL database (pool)");
+    connection.release();
+});
 
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
@@ -144,7 +122,7 @@ app.post("/api/events", authenticateToken, upload.single('image'), (req, res) =>
         const query = `INSERT INTO events (${fields.join(', ')}) VALUES (${placeholders})`;
         console.log('Insert Query:', query);
 
-    pool.query(query, Object.values(insertData), (err, result) => {
+        pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
                 console.error('Create event error:', err);
                 return res.status(500).json({
@@ -440,8 +418,6 @@ app.post("/api/admin/login", (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
-    // Use pool instead of db for clarity
-    //const pool = db;
     pool.query("SELECT * FROM admins WHERE username = ?", [username], (err, results) => {
         if (err) {
             console.error("DB error during admin login:", err);
@@ -823,7 +799,7 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
         const eventId = req.params.id;
         const { title, description, event_date } = req.body;
         // Only update fields that exist in the events table
-    pool.query('SELECT image_url FROM events WHERE id = ?', [eventId], (err, results) => {
+        pool.query('SELECT image_url FROM events WHERE id = ?', [eventId], (err, results) => {
             if (err) {
                 console.error('Fetch old image_url error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
@@ -962,8 +938,6 @@ app.use((req, res) => {
     path: req.originalUrl 
   });
 });
-
-module.exports = pool;
 
 // Start server
 const PORT = process.env.PORT || 5000;
