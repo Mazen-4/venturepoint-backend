@@ -12,7 +12,7 @@ const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
 
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://venturepoint-egypt.com/'],
+    origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -944,4 +944,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
+
 });
