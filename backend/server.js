@@ -12,18 +12,24 @@ const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
 
 
-const db = mysql.createConnection({
+const db = mysql.createPool({
     host: "148.72.3.185",
     user: "vp_DBAdmin",
     password: "Vp_ed#2025%1624*P@s$",
     database: "venturepoint_db"
 });
-db.connect(err => {
-    if (err) {
-        console.error("❌ DB connection failed: ", err);
-        return;
-    }
-    console.log("✅ Connected to MySQL database");
+// db.connect(err => {
+//     if (err) {
+//         console.error("❌ DB connection failed: ", err);
+//         return;
+//     }
+//     console.log("✅ Connected to MySQL database");
+// });
+
+// Add this before EVERY route
+app.use((req, res, next) => {
+    console.log(`🔍 Route ${req.path} - DB status:`, !!db);
+    next();
 });
 
 
@@ -37,6 +43,20 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
+
+app.get('/api/debug-db', (req, res) => {
+    console.log('DB debug - db exists:', !!db);
+    if (!db) {
+        return res.json({ error: 'db not defined' });
+    }
+    
+    db.query('SELECT 1 as test', (err, results) => {
+        if (err) {
+            return res.json({ error: err.message });
+        }
+        res.json({ success: true, db_works: true, results });
+    });
+});
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
