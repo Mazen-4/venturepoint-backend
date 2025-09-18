@@ -19,7 +19,9 @@ const db = mysql.createPool({
     database: "venturepoint_db"
 });
 // Alias for clarity
-const pool = db;
+
+//const pool = db;
+
 // db.connect(err => {
 //     if (err) {
 //         console.error("❌ DB connection failed: ", err);
@@ -30,7 +32,7 @@ const pool = db;
 
 // Add this before EVERY route
 app.use((req, res, next) => {
-    console.log(`🔍 Route ${req.path} - DB status:`, !!db);
+    console.log(`🔍 Route ${req.path} - DB status:`, !!pool);
     next();
 });
 
@@ -47,8 +49,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 app.get('/api/debug-db', (req, res) => {
-    console.log('DB debug - db exists:', !!db);
-    if (!db) {
+    console.log('DB debug - db exists:', !!pool);
+    if (!pool) {
         return res.json({ error: 'db not defined' });
     }
     
@@ -439,7 +441,7 @@ app.post("/api/admin/login", (req, res) => {
     if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
     // Use pool instead of db for clarity
-    const pool = db;
+    //const pool = db;
     pool.query("SELECT * FROM admins WHERE username = ?", [username], (err, results) => {
         if (err) {
             console.error("DB error during admin login:", err);
@@ -961,7 +963,7 @@ app.use((req, res) => {
   });
 });
 
-module.exports = db;
+module.exports = pool;
 
 // Start server
 const PORT = process.env.PORT || 5000;
