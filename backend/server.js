@@ -11,8 +11,24 @@ const jwt = require("jsonwebtoken");
 const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
 
+
+const db = mysql.createConnection({
+    host: "148.72.3.185",
+    user: "vp_DBAdmin",
+    password: "Vp_ed#2025%1624*P@s$",
+    database: "venturepoint_db"
+});
+db.connect(err => {
+    if (err) {
+        console.error("❌ DB connection failed: ", err);
+        return;
+    }
+    console.log("✅ Connected to MySQL database");
+});
+
+
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: ['http://localhost:3000', 'https://venturepoint.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -45,20 +61,6 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 }
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-const db = mysql.createConnection({
-    host: "148.72.3.185",
-    user: "vp_DBAdmin",
-    password: "Vp_ed#2025%1624*P@s$",
-    database: "venturepoint_db"
-});
-db.connect(err => {
-    if (err) {
-        console.error("❌ DB connection failed: ", err);
-        return;
-    }
-    console.log("✅ Connected to MySQL database");
-});
 
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
