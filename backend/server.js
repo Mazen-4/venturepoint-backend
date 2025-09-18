@@ -47,9 +47,9 @@ const upload = multer({
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
+    host: "148.72.3.185",
+    user: "vp_DBAdmin",
+    password: "Vp_ed#2025%1624*P@s$",
     database: "venturepoint_db"
 });
 db.connect(err => {
@@ -934,6 +934,8 @@ app.use((req, res) => {
     path: req.originalUrl 
   });
 });
+
+module.exports = db;
 
 // Start server
 const PORT = process.env.PORT || 5000;
