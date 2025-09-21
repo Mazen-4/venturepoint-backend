@@ -14,6 +14,17 @@ const app = express();
 // Create authors table if not exists (run this SQL in your DB):
 // CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
 
+app.use(cors({
+    origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/images', express.static(path.join(__dirname, 'images')));
+
 // Get all authors
 app.get("/api/authors", (req, res) => {
     pool.query("SELECT * FROM authors", (err, results) => {
@@ -37,16 +48,7 @@ app.post("/api/authors", (req, res) => {
     });
 });
 
-app.use(cors({
-    origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
