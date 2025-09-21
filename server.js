@@ -1,3 +1,15 @@
+// ================== ALL REQUIRES AND CONSTS AT TOP ==================
+const analyticsRouter = require('./routes/analytics');
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const cors = require("cors");
+const mysql = require("mysql2");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
+const app = express();
 // ================= AUTHORS CRUD =================
 // Create authors table if not exists (run this SQL in your DB):
 // CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
@@ -24,18 +36,6 @@ app.post("/api/authors", (req, res) => {
         res.json({ success: true, id: result.insertId, name });
     });
 });
-// ================== ALL REQUIRES AND CONSTS AT TOP ==================
-const analyticsRouter = require('./routes/analytics');
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const cors = require("cors");
-const mysql = require("mysql2");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
-const app = express();
 
 app.use(cors({
     origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
