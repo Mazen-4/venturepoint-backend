@@ -1,3 +1,29 @@
+// ================= AUTHORS CRUD =================
+// Create authors table if not exists (run this SQL in your DB):
+// CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
+
+// Get all authors
+app.get("/api/authors", (req, res) => {
+    pool.query("SELECT * FROM authors", (err, results) => {
+        if (err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+// Add a new author
+app.post("/api/authors", (req, res) => {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Author name required" });
+    pool.query("INSERT INTO authors (name) VALUES (?)", [name], (err, result) => {
+        if (err) {
+            if (err.code === 'ER_DUP_ENTRY') {
+                return res.status(409).json({ error: "Author already exists" });
+            }
+            return res.status(500).send(err);
+        }
+        res.json({ success: true, id: result.insertId, name });
+    });
+});
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
