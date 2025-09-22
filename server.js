@@ -1,3 +1,4 @@
+
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -25,6 +26,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
+// Get all partners (public)
+app.get("/api/partners", (req, res) => {
+    pool.query("SELECT * FROM partners", (err, results) => {
+        if (err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+
 // Get all authors
 app.get("/api/authors", (req, res) => {
     pool.query("SELECT * FROM authors", (err, results) => {
@@ -32,6 +42,7 @@ app.get("/api/authors", (req, res) => {
         res.json(results);
     });
 });
+
 
 // Add a new author
 app.post("/api/authors", (req, res) => {
@@ -566,7 +577,12 @@ app.get('/api/admin/analytics', async (req, res) => {
             res.json({ rows: [] });
         }
     } catch (error) {
-        console.error(error);
+        // Enhanced error logging for debugging
+        if (error && error.response && error.response.data) {
+            console.error('Analytics API error response:', error.response.data);
+        } else {
+            console.error('Analytics API error:', error);
+        }
         res.status(500).json({ error: 'Failed to fetch analytics data' });
     }
 });
