@@ -533,6 +533,43 @@ app.delete("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req
 
 // ================== AUTHENTICATED CRUD ROUTES ==================
 // Analytics endpoint (admin only)
+// If analyticsRouter does not provide /api/admin/analytics, define it here:
+const { google } = require('googleapis');
+const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-042379c47b7f.json');
+const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
+
+app.get('/api/admin/analytics', async (req, res) => {
+    try {
+        const auth = new google.auth.GoogleAuth({
+            keyFile: analyticsKeyPath,
+            scopes: 'https://www.googleapis.com/auth/analytics.readonly',
+        });
+        const analyticsData = google.analyticsdata({ version: 'v1beta', auth });
+
+        const response = await analyticsData.properties.runReport({
+            property: `properties/${GA4_PROPERTY_ID}`,
+            requestBody: {
+                dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+                metrics: [{ name: 'sessions' }],
+                dimensions: [{ name: 'date' }],
+            },
+        });
+
+        // Debug log
+        console.log('GA4 API response:', response.data);
+        if (response && response.data) {
+            res.json({
+                ...response.data,
+                rows: response.data.rows || []
+            });
+        } else {
+            res.json({ rows: [] });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to fetch analytics data' });
+    }
+});
 app.use('/api', analyticsRouter);
 
 // SERVICES CRUD
