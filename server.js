@@ -1,4 +1,3 @@
-
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -26,11 +25,65 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// Get all partners (public)
-app.get("/api/partners", (req, res) => {
-    pool.query("SELECT * FROM partners", (err, results) => {
-        if (err) return res.status(500).send(err);
-        res.json(results);
+
+
+// ================= PARTNERS CRUD =================
+// Get all partners
+app.get('/api/partners', (req, res) => {
+    pool.query('SELECT * FROM partners', (err, results) => {
+        if (err) {
+            console.error('Get partners error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to fetch partners', error: err.message });
+        }
+        res.json({ success: true, data: results });
+    });
+});
+
+// Create partner
+app.post('/api/partners', (req, res) => {
+    const { name, details } = req.body;
+    if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
+    pool.query('INSERT INTO partners (name, details) VALUES (?, ?)', [name, details], (err, result) => {
+        if (err) {
+            console.error('Add partner error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to add partner', error: err.message });
+        }
+        res.status(201).json({
+            success: true,
+            message: 'Partner added successfully',
+            partner: { id: result.insertId, name, details }
+        });
+    });
+});
+
+// Update partner
+app.put('/api/partners/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    const { name, details } = req.body;
+    pool.query('UPDATE partners SET name = ?, details = ? WHERE id = ?', [name, details, id], (err, result) => {
+        if (err) {
+            console.error('Update partner error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to update partner', error: err.message });
+        }
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Partner not found' });
+        res.json({
+            success: true,
+            message: 'Partner updated successfully',
+            partner: { id, name, details }
+        });
+    });
+});
+
+// Delete partner
+app.delete('/api/partners/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    pool.query('DELETE FROM partners WHERE id = ?', [id], (err, result) => {
+        if (err) {
+            console.error('Delete partner error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to delete partner', error: err.message });
+        }
+        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Partner not found' });
+        res.json({ success: true, message: 'Partner deleted successfully' });
     });
 });
 
