@@ -11,8 +11,6 @@ const jwt = require("jsonwebtoken");
 const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
 // ================= AUTHORS CRUD =================
-// Create authors table if not exists (run this SQL in your DB):
-// CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
 
 app.use(cors({
     origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
@@ -33,9 +31,9 @@ app.get('/api/partners', (req, res) => {
     pool.query('SELECT * FROM partners', (err, results) => {
         if (err) {
             console.error('Get partners error:', err);
-            return res.status(500).json({ success: false, message: 'Failed to fetch partners', error: err.message });
+            return res.status(500).json({ success: false, data: [], message: 'Failed to fetch partners', error: err.message });
         }
-        res.json({ success: true, data: results });
+        res.json({ success: true, data: Array.isArray(results) ? results : [] });
     });
 });
 
