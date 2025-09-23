@@ -175,11 +175,12 @@ pool.getConnection((err, connection) => {
 // Serve React app for all non-API routes (frontend routing)
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
-app.get('*', (req, res) => {
-    // Only serve React app for non-API routes
+// Place this BEFORE error handling and 404 middleware
+app.get('*', (req, res, next) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/images')) {
-        res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+        return res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
     }
+    next();
 });
 
 
