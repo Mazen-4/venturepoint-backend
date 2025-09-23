@@ -172,6 +172,15 @@ pool.getConnection((err, connection) => {
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
 // For future: Add pagination and filtering to API endpoints for scalability and usability
+// Serve React app for all non-API routes (frontend routing)
+app.use(express.static(path.join(__dirname, '../frontend/build')));
+
+app.get('*', (req, res) => {
+    // Only serve React app for non-API routes
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/images')) {
+        res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+    }
+});
 
 
 // Middleware
@@ -217,14 +226,14 @@ app.post("/api/events", authenticateToken, upload.single('image'), (req, res) =>
             title: sanitizeForMySQL(title),
             description: sanitizeForMySQL(description),
             event_date: sanitizeForMySQL(event_date),
-            image_url: req.file ? `images/${req.file.filename}` : null
+            image_url: req.file ? images/${req.file.filename} : null
         };
 
         console.log('Insert data:', insertData);
 
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
-        const query = `INSERT INTO events (${fields.join(', ')}) VALUES (${placeholders})`;
+        const query = INSERT INTO events (${fields.join(', ')}) VALUES (${placeholders});
         console.log('Insert Query:', query);
 
         pool.query(query, Object.values(insertData), (err, result) => {
@@ -273,13 +282,13 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
         };
         let newImageUrl = undefined;
         if (req.file) {
-            updateData.image_url = `images/${req.file.filename}`;
+            updateData.image_url = images/${req.file.filename};
             newImageUrl = updateData.image_url;
         }
 
-        const fields = Object.keys(updateData).map(field => `${field} = ?`).join(', ');
+        const fields = Object.keys(updateData).map(field => ${field} = ?).join(', ');
         const values = Object.values(updateData);
-        const query = `UPDATE events SET ${fields} WHERE id = ?`;
+        const query = UPDATE events SET ${fields} WHERE id = ?;
         values.push(id);
         console.log('Update Query:', query);
 
@@ -354,7 +363,7 @@ app.use((error, req, res, next) => {
     if (error instanceof multer.MulterError) {
         return res.status(400).json({
             success: false,
-            message: `File upload error: ${error.message}`,
+            message: File upload error: ${error.message},
             code: error.code
         });
     }
@@ -367,7 +376,7 @@ app.use((error, req, res, next) => {
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(${new Date().toISOString()} - ${req.method} ${req.path});
   if (req.headers.authorization) {
     console.log('Authorization header present:', req.headers.authorization.substring(0, 20) + '...');
   }
@@ -594,7 +603,7 @@ app.put("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req, r
     if (updateFields.length === 0) return res.status(400).json({ error: "No fields to update" });
     
     params.push(req.params.id);
-    pool.query(`UPDATE admins SET ${updateFields.join(", ")} WHERE id = ?`, params, (err, result) => {
+    pool.query(UPDATE admins SET ${updateFields.join(", ")} WHERE id = ?, params, (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
     });
@@ -624,7 +633,7 @@ app.get('/api/admin/analytics', async (req, res) => {
         const analyticsData = google.analyticsdata({ version: 'v1beta', auth });
 
         const response = await analyticsData.properties.runReport({
-            property: `properties/${GA4_PROPERTY_ID}`,
+            property: properties/${GA4_PROPERTY_ID},
             requestBody: {
                 dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
                 metrics: [{ name: 'sessions' }],
@@ -712,7 +721,7 @@ app.post("/api/team", upload.any(), (req, res) => {
         };
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
-        const query = `INSERT INTO team_members (${fields.join(', ')}) VALUES (${placeholders})`;
+        const query = INSERT INTO team_members (${fields.join(', ')}) VALUES (${placeholders});
         pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
                 console.error('Add member error:', err);
@@ -753,14 +762,14 @@ app.put('/api/team/:id', upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            updateData.photo_url = `/images/${file.filename}`;
+            updateData.photo_url = /images/${file.filename};
         } else {
             updateData.photo_url = results[0]?.photo_url || '';
         }
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
-        const setClause = fields.map(f => `${f} = ?`).join(', ');
-        const query = `UPDATE team_members SET ${setClause} WHERE id = ?`;
+        const setClause = fields.map(f => ${f} = ?).join(', ');
+        const query = UPDATE team_members SET ${setClause} WHERE id = ?;
         values.push(memberId);
     pool.query(query, values, (err, result) => {
             if (err) {
@@ -800,13 +809,13 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            insertData.image_url = `/images/${file.filename}`;
+            insertData.image_url = /images/${file.filename};
         } else {
             insertData.image_url = '';
         }
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
-        const query = `INSERT INTO projects (${fields.join(', ')}) VALUES (${placeholders})`;
+        const query = INSERT INTO projects (${fields.join(', ')}) VALUES (${placeholders});
         console.log('Insert query:', query);
         console.log('Insert values:', Object.values(insertData));
         pool.query(query, Object.values(insertData), (err, result) => {
@@ -851,14 +860,14 @@ app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            updateData.image_url = `/images/${file.filename}`;
+            updateData.image_url = /images/${file.filename};
         } else {
             updateData.image_url = results[0]?.image_url || '';
         }
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
-        const setClause = fields.map(f => `${f} = ?`).join(', ');
-        const query = `UPDATE projects SET ${setClause} WHERE id = ?`;
+        const setClause = fields.map(f => ${f} = ?).join(', ');
+        const query = UPDATE projects SET ${setClause} WHERE id = ?;
         values.push(projectId);
         console.log('Update query:', query);
         console.log('Update values:', values);
@@ -956,7 +965,7 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
             if (description !== undefined) updateData.description = description;
             if (event_date !== undefined) updateData.event_date = event_date;
             if (req.file) {
-                updateData.image_url = `images/${req.file.filename}`;
+                updateData.image_url = images/${req.file.filename};
             } else {
                 // Remove any leading slash for consistency
                 let oldUrl = results[0]?.image_url || '';
@@ -965,8 +974,8 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
             }
             const fields = Object.keys(updateData);
             const values = fields.map(f => updateData[f]);
-            const setClause = fields.map(f => `${f} = ?`).join(', ');
-            const query = `UPDATE events SET ${setClause} WHERE id = ?`;
+            const setClause = fields.map(f => ${f} = ?).join(', ');
+            const query = UPDATE events SET ${setClause} WHERE id = ?;
             values.push(eventId);
             console.log('Update Query:', query);
             console.log('Update Values:', values);
@@ -1079,7 +1088,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+  console.log(404 - Route not found: ${req.method} ${req.originalUrl});
   res.status(404).json({ 
     error: 'Route not found',
     path: req.originalUrl 
@@ -1089,6 +1098,6 @@ app.use((req, res) => {
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌐 CORS enabled for: http://localhost:3000`);
+    console.log(🚀 Server running on port ${PORT});
+    console.log(🌐 CORS enabled for: http://localhost:3000);
 });
