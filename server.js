@@ -37,6 +37,21 @@ app.get('/api/partners', (req, res) => {
     });
 });
 
+// Get single partner by ID
+app.get('/api/partners/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    pool.query('SELECT * FROM partners WHERE id = ?', [id], (err, results) => {
+        if (err) {
+            console.error('Get partner by ID error:', err);
+            return res.status(500).json({ success: false, data: null, message: 'Failed to fetch partner', error: err.message });
+        }
+        if (!results || results.length === 0) {
+            return res.status(404).json({ success: false, data: null, message: 'Partner not found' });
+        }
+        res.json({ success: true, data: results[0] });
+    });
+});
+
 // Create partner
 app.post('/api/partners', (req, res) => {
     const { name, details } = req.body;
