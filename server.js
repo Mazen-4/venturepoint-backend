@@ -172,16 +172,6 @@ pool.getConnection((err, connection) => {
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
 // For future: Add pagination and filtering to API endpoints for scalability and usability
-// Serve React app for all non-API routes (frontend routing)
-app.use(express.static(path.join(__dirname, '../frontend/build')));
-
-// Place this BEFORE error handling and 404 middleware
-app.get('*', (req, res, next) => {
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/images')) {
-        return res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
-    }
-    next();
-});
 
 
 // Middleware
