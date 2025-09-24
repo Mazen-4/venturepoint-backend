@@ -26,7 +26,65 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// Get all partners (public)
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadDir = path.join(__dirname, 'images');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+        cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const fileFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image files are allowed!'), false);
+    }
+};
+const upload = multer({
+    storage,
+    fileFilter,
+    limits: { fileSize: 100 * 1024 * 1024 }
+});
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+const pool = mysql.createPool({
+    host: "148.72.3.185",
+    user: "vp_DBAdmin",
+    password: "Vp_ed#2025%1624*P@s$",
+    database: "venturepoint_db",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+pool.getConnection((err, connection) => {
+    if (err) {
+        console.error("❌ DB pool connection failed: ", err);
+        return;
+    }
+    console.log("✅ Connected to MySQL database (pool)");
+    connection.release();
+});
+
+// ================= OPTIONAL ENHANCEMENTS =================
+// For future: Implement audit logging (track admin actions for security and accountability)
+// For future: Add pagination and filtering to API endpoints for scalability and usability
+
+
+// Middleware
+app.use('/api/events', (req, res, next) => {
+    // Skip body parsing for file upload routes
+    if ((req.method === 'POST' || req.method === 'PUT') && req.headers['content-type']?.includes('multipart/form-data')) {
+        return next();
+    }
+    express.json()(req, res, () => {
+        express.urlencoded({ extended: true })(req, res, next);
+    });
+});
+
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
@@ -134,65 +192,6 @@ app.post("/api/authors", (req, res) => {
     });
 });
 
-
-
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadDir = path.join(__dirname, 'images');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-        cb(null, uploadDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
-const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-    } else {
-        cb(new Error('Only image files are allowed!'), false);
-    }
-};
-const upload = multer({
-    storage,
-    fileFilter,
-    limits: { fileSize: 100 * 1024 * 1024 }
-});
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-const pool = mysql.createPool({
-    host: "148.72.3.185",
-    user: "vp_DBAdmin",
-    password: "Vp_ed#2025%1624*P@s$",
-    database: "venturepoint_db",
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
-pool.getConnection((err, connection) => {
-    if (err) {
-        console.error("❌ DB pool connection failed: ", err);
-        return;
-    }
-    console.log("✅ Connected to MySQL database (pool)");
-    connection.release();
-});
-
-// ================= OPTIONAL ENHANCEMENTS =================
-// For future: Implement audit logging (track admin actions for security and accountability)
-// For future: Add pagination and filtering to API endpoints for scalability and usability
-
-
-// Middleware
-app.use('/api/events', (req, res, next) => {
-    // Skip body parsing for file upload routes
-    if ((req.method === 'POST' || req.method === 'PUT') && req.headers['content-type']?.includes('multipart/form-data')) {
-        return next();
-    }
-    express.json()(req, res, () => {
-        express.urlencoded({ extended: true })(req, res, next);
-    });
-});
 
 // For all other routes
 app.use((req, res, next) => {
