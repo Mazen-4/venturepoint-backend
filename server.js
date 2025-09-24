@@ -169,16 +169,27 @@ app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (r
 
 
 // Get all authors
+
+// ===== AUTHORS CRUD =====
+// Get all authors (public)
 app.get("/api/authors", (req, res) => {
     pool.query("SELECT * FROM authors", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json(results);
+        res.json({ data: results });
     });
 });
 
+// Get a single author by ID (public)
+app.get("/api/authors/:id", (req, res) => {
+    pool.query("SELECT * FROM authors WHERE id = ?", [req.params.id], (err, results) => {
+        if (err) return res.status(500).send(err);
+        if (!results || results.length === 0) return res.status(404).json({ error: "Author not found" });
+        res.json({ data: results[0] });
+    });
+});
 
-// Add a new author
-app.post("/api/authors", (req, res) => {
+// Add a new author (admin or superadmin)
+app.post("/api/authors", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Author name required" });
     pool.query("INSERT INTO authors (name) VALUES (?)", [name], (err, result) => {
@@ -188,7 +199,27 @@ app.post("/api/authors", (req, res) => {
             }
             return res.status(500).send(err);
         }
-        res.json({ success: true, id: result.insertId, name });
+        res.status(201).json({ success: true, id: result.insertId, author: { id: result.insertId, name } });
+    });
+});
+
+// Update an author (admin or superadmin)
+app.put("/api/authors/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Author name required" });
+    pool.query("UPDATE authors SET name = ? WHERE id = ?", [name, req.params.id], (err, result) => {
+        if (err) return res.status(500).send(err);
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
+        res.json({ success: true, message: "Author updated successfully" });
+    });
+});
+
+// Delete an author (superadmin only)
+app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    pool.query("DELETE FROM authors WHERE id = ?", [req.params.id], (err, result) => {
+        if (err) return res.status(500).send(err);
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
+        res.json({ success: true, message: "Author deleted successfully" });
     });
 });
 
