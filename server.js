@@ -27,10 +27,85 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // Get all partners (public)
+
+// Get all partners (public)
 app.get("/api/partners", (req, res) => {
     pool.query("SELECT * FROM partners", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json(results);
+        res.json({ data: results });
+    });
+});
+
+// Get a single partner by ID (public)
+app.get("/api/partners/:id", (req, res) => {
+    pool.query("SELECT * FROM partners WHERE id = ?", [req.params.id], (err, results) => {
+        if (err) return res.status(500).send(err);
+        if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
+        res.json({ data: results[0] });
+    });
+});
+
+// Add a new partner (admin or superadmin, with image upload)
+app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
+    try {
+        const { name, description, website, ...otherFields } = req.body;
+        if (!name) return res.status(400).json({ error: "Partner name required" });
+        let insertData = { name, description, website, ...otherFields };
+        if (req.file) {
+            insertData.image_url = `/images/${req.file.filename}`;
+        }
+        const fields = Object.keys(insertData);
+        const placeholders = fields.map(() => '?').join(', ');
+        const query = `INSERT INTO partners (${fields.join(', ')}) VALUES (${placeholders})`;
+        pool.query(query, Object.values(insertData), (err, result) => {
+            if (err) {
+                if (err.code === 'ER_DUP_ENTRY') {
+                    return res.status(409).json({ error: "Partner already exists" });
+                }
+                return res.status(500).send(err);
+            }
+            res.status(201).json({ success: true, id: result.insertId, partner: { id: result.insertId, ...insertData } });
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Update a partner (admin/superadmin, with image upload)
+app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
+    const partnerId = req.params.id;
+    const { name, description, website, ...otherFields } = req.body;
+    // Get old image_url if no new image is uploaded
+    pool.query('SELECT image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
+        let updateData = { ...otherFields };
+        if (name !== undefined) updateData.name = name;
+        if (description !== undefined) updateData.description = description;
+        if (website !== undefined) updateData.website = website;
+        if (req.file) {
+            updateData.image_url = `/images/${req.file.filename}`;
+        } else {
+            updateData.image_url = results[0]?.image_url || '';
+        }
+        const fields = Object.keys(updateData);
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
+        values.push(partnerId);
+        pool.query(query, values, (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, message: 'Partner updated successfully' });
+        });
+    });
+});
+
+// Delete a partner (superadmin only)
+app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    pool.query("DELETE FROM partners WHERE id = ?", [req.params.id], (err, result) => {
+        if (err) return res.status(500).send(err);
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Partner not found" });
+        res.json({ success: true, message: "Partner deleted successfully" });
     });
 });
 
