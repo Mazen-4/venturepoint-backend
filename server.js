@@ -179,6 +179,52 @@ app.get("/api/authors", (req, res) => {
     });
 });
 
+// GET /api/advisors - Fetch all advisors
+app.get('/api/advisors', (req, res) => {
+    console.log('Fetching advisors from database...');
+    const query = `
+        SELECT id, name, area_of_focus, bio, photo_url 
+        FROM advisors 
+        ORDER BY area_of_focus, name
+    `;
+    pool.query(query, (err, results) => {
+        if (err) {
+            console.error('Error fetching advisors:', err);
+            return res.status(500).json({ 
+                error: 'Failed to fetch advisors',
+                details: err.message 
+            });
+        }
+        console.log(`Found ${results.length} advisors`);
+        res.json(results);
+    });
+});
+
+// GET /api/advisors/:id - Fetch a specific advisor by ID
+app.get('/api/advisors/:id', (req, res) => {
+    const advisorId = req.params.id;
+    console.log(`Fetching advisor with ID: ${advisorId}`);
+    const query = `
+        SELECT id, name, area_of_focus, bio, photo_url 
+        FROM advisors 
+        WHERE id = ?
+    `;
+    pool.query(query, [advisorId], (err, results) => {
+        if (err) {
+            console.error('Error fetching advisor:', err);
+            return res.status(500).json({ 
+                error: 'Failed to fetch advisor',
+                details: err.message 
+            });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ error: 'Advisor not found' });
+        }
+        console.log(`Found advisor: ${results[0].name}`);
+        res.json(results[0]);
+    });
+});
+
 // Get a single author by ID (public)
 app.get("/api/authors/:id", (req, res) => {
     pool.query("SELECT * FROM authors WHERE id = ?", [req.params.id], (err, results) => {
