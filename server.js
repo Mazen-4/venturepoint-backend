@@ -225,6 +225,48 @@ app.get('/api/advisors/:id', (req, res) => {
     });
 });
 
+// POST /api/advisors - Create a new advisor (admin/superadmin, with image upload)
+app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('photo'), (req, res) => {
+    const { name, area_of_focus, bio } = req.body;
+    if (!name || !area_of_focus || !bio) {
+        return res.status(400).json({ error: 'Name, area_of_focus, and bio are required' });
+    }
+    let photo_url = req.file ? `/images/${req.file.filename}` : '';
+    const query = 'INSERT INTO advisors (name, area_of_focus, bio, photo_url) VALUES (?, ?, ?, ?)';
+    pool.query(query, [name, area_of_focus, bio, photo_url], (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Failed to create advisor', details: err.message });
+        }
+        res.status(201).json({ success: true, id: result.insertId });
+    });
+});
+
+// PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
+app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('photo'), (req, res) => {
+    const advisorId = req.params.id;
+    const { name, area_of_focus, bio } = req.body;
+    // Get old photo_url if no new photo is uploaded
+    pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
+        let photo_url = req.file ? `/images/${req.file.filename}` : results[0]?.photo_url || '';
+        const query = 'UPDATE advisors SET name = ?, area_of_focus = ?, bio = ?, photo_url = ? WHERE id = ?';
+        pool.query(query, [name, area_of_focus, bio, photo_url, advisorId], (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, message: 'Advisor updated successfully' });
+        });
+    });
+});
+
+// DELETE /api/advisors/:id - Delete an advisor (superadmin only)
+app.delete('/api/advisors/:id', authenticateToken, requireRole('superadmin'), (req, res) => {
+    pool.query('DELETE FROM advisors WHERE id = ?', [req.params.id], (err, result) => {
+        if (err) return res.status(500).send(err);
+        if (result.affectedRows === 0) return res.status(404).json({ error: 'Advisor not found' });
+        res.json({ success: true, message: 'Advisor deleted successfully' });
+    });
+});
+
 // Get a single author by ID (public)
 app.get("/api/authors/:id", (req, res) => {
     pool.query("SELECT * FROM authors WHERE id = ?", [req.params.id], (err, results) => {
