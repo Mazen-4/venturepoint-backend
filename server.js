@@ -190,9 +190,17 @@ app.get('/api/advisors', (req, res) => {
     pool.query(query, (err, results) => {
         if (err) {
             console.error('Error fetching advisors:', err);
+            // Log more details for debugging
+            try {
+                require('fs').appendFileSync('advisors-error.log', `\n[${new Date().toISOString()}] QUERY: ${query}\nERROR: ${JSON.stringify(err)}\nCONNECTION STATE: ${JSON.stringify(pool.config)}\n`);
+            } catch (logErr) {
+                console.error('Failed to write to advisors-error.log:', logErr);
+            }
             return res.status(500).json({ 
                 error: 'Failed to fetch advisors',
-                details: err.message 
+                details: err.message,
+                code: err.code || null,
+                stack: err.stack || null
             });
         }
         console.log(`Found ${results.length} advisors`);
