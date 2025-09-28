@@ -747,8 +747,9 @@ app.delete("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req
 // Analytics endpoint (admin only)
 // If analyticsRouter does not provide /api/admin/analytics, define it here:
 const { google } = require('googleapis');
-const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-a96d5378194c.json');
-const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
+// const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-a96d5378194c.json');
+ const keyFilePath = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json'); // 
+ const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
 
 
 app.get('/api/admin/analytics', async (req, res) => {
