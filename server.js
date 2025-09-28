@@ -749,11 +749,12 @@ app.delete("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req
 const { google } = require('googleapis');
 const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-e5124592a499.json');
 const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
+import path from 'path'
 
 app.get('/api/admin/analytics', async (req, res) => {
     try {
         const auth = new google.auth.GoogleAuth({
-            keyFile: analyticsKeyPath,
+            keyFile: path.resolve(analyticsKeyPath),
             scopes: 'https://www.googleapis.com/auth/analytics.readonly',
         });
         const analyticsData = google.analyticsdata({ version: 'v1beta', auth });
@@ -784,7 +785,11 @@ app.get('/api/admin/analytics', async (req, res) => {
         } else {
             console.error('Analytics API error:', error);
         }
-        res.status(500).json({ error: 'Failed to fetch analytics data' });
+       // res.status(500).json({ error: 'Failed to fetch analytics data' });
+
+        console.error("Full analytics error:", error.response?.data || error.message || error);
+        res.status(500).json({ error: error.response?.data || error.message || 'Unknown error' });
+
     }
 });
 app.use('/api', analyticsRouter);
