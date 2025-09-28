@@ -2,10 +2,9 @@ const express = require('express');
 const { google } = require('googleapis');
 const path = require('path');
 const router = express.Router();
-const db = require('../server.js');
 
 // Path to your service account key
-const KEYFILEPATH = path.join(__dirname, '../credentials/venturepoint-042379c47b7f.json');
+const KEYFILEPATH = path.join(__dirname, '../credentials/venturepoint-a96d5378194c.json');
 // Your GA4 property ID
 const PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID
 
