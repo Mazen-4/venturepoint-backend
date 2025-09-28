@@ -4,8 +4,9 @@ const path = require('path');
 const router = express.Router();
 
 // Path to your service account key
-const KEYFILEPATH = path.join(__dirname, '../credentials/venturepoint-a96d5378194c.json');
-// Your GA4 property ID
+// const KEYFILEPATH = path.join(__dirname, '../credentials/venturepoint-a96d5378194c.json');
+ const keyFilePath = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json'); // 
+ // Your GA4 property ID
 const PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID
 
 router.get('/admin/analytics', async (req, res) => {
