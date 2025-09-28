@@ -779,16 +779,29 @@ app.get('/api/admin/analytics', async (req, res) => {
             res.json({ rows: [] });
         }
     } catch (error) {
-        // Enhanced error logging for debugging
-        if (error && error.response && error.response.data) {
-            console.error('Analytics API error response:', error.response.data);
-        } else {
-            console.error('Analytics API error:', error);
-        }
-       // res.status(500).json({ error: 'Failed to fetch analytics data' });
 
-        console.error("Full analytics error:", error.response?.data || error.message || error);
-        res.status(500).json({ error: error.response?.data || error.message || 'Unknown error' });
+        console.error('🔥 Google Analytics API Error 🔥');
+        console.error('Message:', error.message);
+        console.error('Code:', error.code);
+        console.error('Stack:', error.stack);
+
+        if (error.response && error.response.data) {
+            console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+        }
+
+        res.status(500).json({ error: 'Failed to fetch analytics data', details: error.message });
+
+
+    //     // Enhanced error logging for debugging
+    //     if (error && error.response && error.response.data) {
+    //         console.error('Analytics API error response:', error.response.data);
+    //     } else {
+    //         console.error('Analytics API error:', error);
+    //     }
+    //    // res.status(500).json({ error: 'Failed to fetch analytics data' });
+
+    //     console.error("Full analytics error:", error.response?.data || error.message || error);
+    //     res.status(500).json({ error: error.response?.data || error.message || 'Unknown error' });
 
     }
 });
