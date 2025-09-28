@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const { google } = require('googleapis');
 const path = require('path');
@@ -52,3 +51,4 @@ router.get('/admin/analytics', async (req, res) => {
 });
 
 module.exports = router;
+
