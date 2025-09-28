@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const { google } = require('googleapis');
 const path = require('path');
@@ -11,10 +12,16 @@ const PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID
 
 router.get('/admin/analytics', async (req, res) => {
   try {
-    const auth = new google.auth.GoogleAuth({
-      keyFile: analyticsKeyPath ,
-      scopes: 'https://www.googleapis.com/auth/analytics.readonly',
-    });
+    // const auth = new google.auth.GoogleAuth({
+    //   keyFile: analyticsKeyPath ,
+    //   scopes: 'https://www.googleapis.com/auth/analytics.readonly',
+    // });
+    const credentials = JSON.parse(process.env.GA4_KEY_JSON);
+        const auth = new google.auth.GoogleAuth({
+            credentials,
+            scopes: 'https://www.googleapis.com/auth/analytics.readonly',
+        });
+
     const analyticsData = google.analyticsdata({ version: 'v1beta', auth });
 
     // Example: Get sessions by date for last 7 days
