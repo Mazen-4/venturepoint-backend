@@ -766,7 +766,7 @@ app.get('/api/admin/analytics', async (req, res) => {
         const analyticsData = google.analyticsdata({ version: 'v1beta', auth });
 
         const response = await analyticsData.properties.runReport({
-            property: `properties/${GA4_PROPERTY_ID}`,
+            property: `properties/${process.env.GA4_PROPERTY_ID}`,
             requestBody: {
                 dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
                 metrics: [{ name: 'sessions' }],
@@ -776,7 +776,7 @@ app.get('/api/admin/analytics', async (req, res) => {
 
         // Debug log
         console.log('GA4 API response:', response.data);
-        console.log('Using key file path:', analyticsKeyPath);
+        //console.log('Using key file path:', analyticsKeyPath);
         if (response && response.data) {
             res.json({
                 ...response.data,
