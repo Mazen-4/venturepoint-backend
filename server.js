@@ -748,7 +748,7 @@ app.delete("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req
 // If analyticsRouter does not provide /api/admin/analytics, define it here:
 const { google } = require('googleapis');
 // const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-a96d5378194c.json');
- const keyFilePath = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json'); // 
+ const analyticsKeyPath  = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json') // 
  const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
 
 
@@ -771,6 +771,7 @@ app.get('/api/admin/analytics', async (req, res) => {
 
         // Debug log
         console.log('GA4 API response:', response.data);
+        console.log('Using key file path:', analyticsKeyPath);
         if (response && response.data) {
             res.json({
                 ...response.data,
@@ -785,6 +786,7 @@ app.get('/api/admin/analytics', async (req, res) => {
         console.error('Message:', error.message);
         console.error('Code:', error.code);
         console.error('Stack:', error.stack);
+        console.error('Error stack:', error.stack);
 
         if (error.response && error.response.data) {
             console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
@@ -806,7 +808,7 @@ app.get('/api/admin/analytics', async (req, res) => {
 
     }
 });
-app.use('/api', analyticsRouter);
+//app.use('/api', analyticsRouter);
 
 // SERVICES CRUD
 app.get("/api/services/:id", (req, res) => {
