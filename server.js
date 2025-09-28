@@ -747,7 +747,7 @@ app.delete("/api/admins/:id", authenticateToken, requireRole("superadmin"), (req
 // If analyticsRouter does not provide /api/admin/analytics, define it here:
 const { google } = require('googleapis');
 // const analyticsKeyPath = path.join(__dirname, 'credentials/venturepoint-a96d5378194c.json');
- const analyticsKeyPath  = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json') // 
+// const analyticsKeyPath  = path.join(__dirname, 'credentials', 'venturepoint-a96d5378194c.json') // 
  const GA4_PROPERTY_ID = '505423261'; // <-- Replace with your actual property ID if needed
 
 
@@ -1253,4 +1253,3 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
-
