@@ -1,4 +1,4 @@
-
+require('dotenv').config();
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
