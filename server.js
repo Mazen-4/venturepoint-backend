@@ -956,13 +956,18 @@ app.put('/api/team/:id', upload.any(), async (req, res) => {
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         let newPhotoUrl = oldPhotoUrl;
 
-        if (file) {
-            newPhotoUrl = `/images/${file.filename}`;
 
-            // 3. Delete old image from uploads table
+        if (file) {
+            // Save the uploaded file buffer to the uploads table
+            // Use the same logic as /upload route
+            const { originalname, mimetype, buffer } = file;
+            await pool.promise().query('INSERT INTO uploads (name, mimetype, data) VALUES (?, ?, ?)', [originalname, mimetype, buffer]);
+            newPhotoUrl = `/images/${file.originalname}`;
+
+            // 3. Delete old image from uploads table (by name column)
             if (oldPhotoUrl && oldPhotoUrl.startsWith('/images/')) {
                 const oldFileName = oldPhotoUrl.split('/').pop();
-                await pool.promise().query('DELETE FROM uploads WHERE filename = ?', [oldFileName]);
+                await pool.promise().query('DELETE FROM uploads WHERE name = ?', [oldFileName]);
             }
         }
 
