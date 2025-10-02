@@ -973,26 +973,20 @@ app.get("/api/projects/:id", (req, res) => {
     });
 });
 
-app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
+app.post("/api/projects", authenticateToken, (req, res) => {
     try {
-        console.log('--- Add Project Debug ---');
-        console.log('req.body:', req.body);
-        console.log('req.files:', req.files);
-        // Parse fields from req.body
-        const { name, description, region, start_date, end_date } = req.body;
-        let insertData = { name, description, region, start_date, end_date };
-        // Accept any file field name
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            insertData.image_url = `/images/${file.filename}`;
-        } else {
-            insertData.image_url = '';
-        }
+        const { name, description, region, start_date, end_date, image_url } = req.body;
+        let insertData = {
+            name,
+            description,
+            region,
+            start_date,
+            end_date,
+            image_url: image_url ? parseInt(image_url) : null
+        };
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
         const query = `INSERT INTO projects (${fields.join(', ')}) VALUES (${placeholders})`;
-        console.log('Insert query:', query);
-        console.log('Insert values:', Object.values(insertData));
         pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
                 console.error('Add project error:', err);
@@ -1016,43 +1010,28 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
 
 
 // Update a project, with optional image upload
-app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
+app.put("/api/projects/:id", authenticateToken, (req, res) => {
     const projectId = req.params.id;
-    console.log('--- Edit Project Debug ---');
-    console.log('req.body:', req.body);
-    console.log('req.files:', req.files);
-    // Parse fields from req.body
-    const { title, description, ...otherFields } = req.body;
-    // Get old image_url if no new image is uploaded
-    pool.query('SELECT image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
+    const { name, description, region, start_date, end_date, image_url } = req.body;
+    let updateData = {
+        name,
+        description,
+        region,
+        start_date,
+        end_date,
+        image_url: image_url ? parseInt(image_url) : null
+    };
+    const fields = Object.keys(updateData);
+    const values = fields.map(f => updateData[f]);
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const query = `UPDATE projects SET ${setClause} WHERE id = ?`;
+    values.push(projectId);
+    pool.query(query, values, (err, result) => {
         if (err) {
-            console.error('Fetch old image_url error:', err);
+            console.error('Update project error:', err);
             return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
         }
-        let updateData = { ...otherFields };
-        if (title !== undefined) updateData.title = title;
-        if (description !== undefined) updateData.description = description;
-        // Accept any file field name
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            updateData.image_url = `/images/${file.filename}`;
-        } else {
-            updateData.image_url = results[0]?.image_url || '';
-        }
-        const fields = Object.keys(updateData);
-        const values = fields.map(f => updateData[f]);
-        const setClause = fields.map(f => `${f} = ?`).join(', ');
-        const query = `UPDATE projects SET ${setClause} WHERE id = ?`;
-        values.push(projectId);
-        console.log('Update query:', query);
-        console.log('Update values:', values);
-    pool.query(query, values, (err, result) => {
-            if (err) {
-                console.error('Update project error:', err);
-                return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
-            }
-            res.json({ success: true, message: 'Project updated successfully' });
-        });
+        res.json({ success: true, message: 'Project updated successfully' });
     });
 });
 
