@@ -1075,6 +1075,27 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
 });
 
 // ARTICLES CRUD
+// Download article document (BLOB)
+app.get("/api/articles/:id/download", (req, res) => {
+    const articleId = req.params.id;
+    pool.query("SELECT article, title FROM articles WHERE id = ?", [articleId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Failed to fetch article document" });
+        }
+        if (!results || results.length === 0 || !results[0].article) {
+            return res.status(404).json({ error: "Article document not found" });
+        }
+        const buffer = results[0].article;
+        // Try to detect file type (default to PDF)
+        let mimeType = "application/pdf";
+        // Optionally, you can store mimetype in DB for more accuracy
+        // For now, default to PDF
+        const filename = `${results[0].title || 'article'}_${articleId}.pdf`;
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
+        res.send(buffer);
+    });
+});
 app.get("/api/articles/:id", (req, res) => {
     pool.query("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
