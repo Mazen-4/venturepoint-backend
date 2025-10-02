@@ -1,3 +1,5 @@
+const imageRoutes = require('./routes/imageRoutes');
+app.use('/', imageRoutes);
 
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
@@ -1097,23 +1099,20 @@ app.post("/api/articles", authenticateToken, (req, res) => {
     });
 });
 
-app.put("/api/articles/:id", authenticateToken, (req, res) => {
-    const pdfUpload = multer({ storage: multer.memoryStorage() });
-    app.put("/api/articles/:id", authenticateToken, pdfUpload.single('article_pdf'), (req, res) => {
-        const { title, content, author_name, created_at } = req.body;
-        const updateFields = {
-            title,
-            content,
-            author_name,
-            created_at
-        };
-        if (req.file) {
-            updateFields.article = req.file.buffer; // Store PDF as BLOB
-        }
-        pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
-            if (err) return res.status(500).send(err);
-            res.json({ success: true });
-        });
+app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
+    const { title, content, author_name, created_at } = req.body;
+    const updateFields = {
+        title,
+        content,
+        author_name,
+        created_at
+    };
+    if (req.file) {
+        updateFields.article = req.file.buffer; // Store PDF as BLOB
+    }
+    pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.json({ success: true });
     });
 });
 
