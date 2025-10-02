@@ -10,9 +10,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
-
-const imageRoutes = require('./routes/imageRoutes');
-app.use('/', imageRoutes);
 // ================= AUTHORS CRUD =================
 // Create authors table if not exists (run this SQL in your DB):
 // CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
@@ -28,12 +25,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// // Serve PDFs from articles folder
-// app.use('/articles', express.static(path.join(__dirname, 'articles')));
-
-// // Register article upload route
-// const articleRouter = require('./routes/article');
-// app.use('/api/articles', articleRouter);
+// PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
 
 
 const fileFilter = (req, file, cb) => {
@@ -105,6 +97,22 @@ app.post('/upload', upload.single('image'), (req, res) => {
     });
 });
 
+// GET image by ID (from uploads table)
+app.get('/image/:id', (req, res) => {
+    const { id } = req.params;
+    pool.query('SELECT mimetype, data FROM uploads WHERE id = ?', [id], (err, results) => {
+        if (err) {
+            console.error('Image fetch error:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) {
+            return res.status(404).json({ error: 'Image not found' });
+        }
+        const { mimetype, data } = results[0];
+        res.setHeader('Content-Type', mimetype || 'image/jpeg');
+        res.send(data);
+    });
+});
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
@@ -1088,9 +1096,19 @@ app.post("/api/articles", authenticateToken, (req, res) => {
     });
 });
 
-app.put("/api/articles/:id", authenticateToken, (req, res) => {
-    pool.query("UPDATE articles SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
-        if (err) return res.status(500).send(err);
+app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
+    const { title, content, author_name, created_at } = req.body;
+    // Only update fields that exist in the articles table
+    let updateFields = {};
+    if (title !== undefined) updateFields.title = title;
+    if (content !== undefined) updateFields.content = content;
+    if (author_name !== undefined) updateFields.author_name = author_name;
+    if (created_at !== undefined) updateFields.created_at = created_at;
+    if (req.file && req.file.mimetype === 'application/pdf') {
+        updateFields.article = req.file.buffer; // Store PDF as BLOB
+    }
+    pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
+        if (err) return res.status(500).json({ success: false, error: err.message });
         res.json({ success: true });
     });
 });
