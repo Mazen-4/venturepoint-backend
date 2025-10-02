@@ -1,5 +1,3 @@
-const imageRoutes = require('./routes/imageRoutes');
-app.use('/', imageRoutes);
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -12,6 +10,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { authenticateToken, requireRole, requireAnyRole } = require("./auth");
 const app = express();
+
+const imageRoutes = require('./routes/imageRoutes');
+app.use('/', imageRoutes);
 // ================= AUTHORS CRUD =================
 // Create authors table if not exists (run this SQL in your DB):
 // CREATE TABLE IF NOT EXISTS authors (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE);
