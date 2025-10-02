@@ -29,10 +29,20 @@ app.use('/images', express.static(path.join(__dirname, 'images')));
 
 
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    const allowedTypes = [
+        'image/',
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain'
+    ];
+    if (
+        file.mimetype.startsWith('image/') ||
+        allowedTypes.includes(file.mimetype)
+    ) {
         cb(null, true);
     } else {
-        cb(new Error('Only image files are allowed!'), false);
+        cb(new Error('Only image, PDF, DOC, DOCX, and TXT files are allowed!'), false);
     }
 };
 const upload = multer({
