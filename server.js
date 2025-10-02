@@ -25,6 +25,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
+// Serve PDFs from articles folder
+app.use('/articles', express.static(path.join(__dirname, 'articles')));
+
+// Register article upload route
+const articleRouter = require('./routes/article');
+app.use('/api/articles', articleRouter);
+
 
 const fileFilter = (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -74,26 +81,25 @@ app.use('/api/events', (req, res, next) => {
     });
 });
 
-// Handling uploads on the database nto render
-app.post('/upload', upload.single('image'), async (req, res) => {
-  const { originalname, mimetype, buffer } = req.file;
-
-  try {
-    const [result] = await db.query(
-      'INSERT INTO uploads (name, mimetype, data) VALUES (?, ?, ?)',
-      [originalname, mimetype, buffer]
-    );
-
-    const newId = result.insertId;
-    res.json({
-      id: newId,
-      message: 'Image uploaded successfully',
-      url: `/image/${newId}` // you can use this directly in <img src="">
+// Handling uploads on the database (for /upload)
+app.post('/upload', upload.single('image'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const { originalname, mimetype, buffer } = req.file;
+    const query = 'INSERT INTO uploads (name, mimetype, data) VALUES (?, ?, ?)';
+    pool.query(query, [originalname, mimetype, buffer], (err, result) => {
+        if (err) {
+            console.error('Upload error:', err);
+            return res.status(500).json({ error: 'Failed to upload image' });
+        }
+        const newId = result.insertId;
+        res.json({
+            id: newId,
+            message: 'Image uploaded successfully',
+            url: `/image/${newId}` // you can use this directly in <img src="">
+        });
     });
-  } catch (err) {
-    console.error('Upload error:', err);
-    res.status(500).json({ error: 'Failed to upload image' });
-  }
 });
 
 
