@@ -25,12 +25,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// Serve PDFs from articles folder
-app.use('/articles', express.static(path.join(__dirname, 'articles')));
+// // Serve PDFs from articles folder
+// app.use('/articles', express.static(path.join(__dirname, 'articles')));
 
-// Register article upload route
-const articleRouter = require('./routes/article');
-app.use('/api/articles', articleRouter);
+// // Register article upload route
+// const articleRouter = require('./routes/article');
+// app.use('/api/articles', articleRouter);
 
 
 const fileFilter = (req, file, cb) => {
