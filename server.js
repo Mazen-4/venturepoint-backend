@@ -1,3 +1,37 @@
+// Update event route (JSON, image_url is uploads table ID)
+app.put("/api/events/:id", authenticateToken, (req, res) => {
+    try {
+    console.log('=== UPDATE EVENT DEBUG ===');
+    console.log('Body:', req.body);
+    console.log('File:', req.file);
+    const { title, description, event_date, image_url } = req.body;
+    const id = req.params.id;
+    // Validate required fields
+        let updateData = {
+            title: sanitizeForMySQL(title),
+            description: sanitizeForMySQL(description),
+    const fields = Object.keys(updateData).map(field => `${field} = ?`).join(', ');
+    const values = Object.values(updateData);
+    const query = `UPDATE events SET ${fields} WHERE id = ?`;
+        pool.query(query, values, (err, result) => {
+            if (err) {
+                console.error('Update event error:', err);
+            return res.status(200).json({
+                success: true,
+                message: 'Event updated successfully',
+                image_url: updateData.image_url,
+                data: {
+                    id,
+                    ...updateData
+                }
+            });
+        const insertData = {
+            title: sanitizeForMySQL(title),
+            description: sanitizeForMySQL(description),
+            event_date: sanitizeForMySQL(event_date),
+            image_url: image_url ? parseInt(image_url) : null
+        };
+
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -29,20 +63,10 @@ app.use('/images', express.static(path.join(__dirname, 'images')));
 
 
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = [
-        'image/',
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'text/plain'
-    ];
-    if (
-        file.mimetype.startsWith('image/') ||
-        allowedTypes.includes(file.mimetype)
-    ) {
+    if (file.mimetype.startsWith('image/')) {
         cb(null, true);
     } else {
-        cb(new Error('Only image, PDF, DOC, DOCX, and TXT files are allowed!'), false);
+        cb(new Error('Only image files are allowed!'), false);
     }
 };
 const upload = multer({
@@ -367,17 +391,10 @@ app.use((req, res, next) => {
         express.urlencoded({ extended: true })(req, res, next);
     });
 });
-// Create event route with image upload
-app.post("/api/events", authenticateToken, upload.single('image'), (req, res) => {
+// Create event route (JSON, image_url is uploads table ID)
+app.post("/api/events", authenticateToken, (req, res) => {
     try {
-        console.log('=== CREATE EVENT DEBUG ===');
-        console.log('Body:', req.body);
-        console.log('File:', req.file);
-        console.log('==========================');
-
-
-        const { title, description, event_date } = req.body;
-
+        const { title, description, event_date, image_url } = req.body;
         // Validate required fields
         if (!title || !sanitizeForMySQL(title)) {
             return res.status(400).json({
@@ -385,21 +402,15 @@ app.post("/api/events", authenticateToken, upload.single('image'), (req, res) =>
                 message: 'Title is required'
             });
         }
-
         const insertData = {
             title: sanitizeForMySQL(title),
             description: sanitizeForMySQL(description),
             event_date: sanitizeForMySQL(event_date),
-            image_url: req.file ? `images/${req.file.filename}` : null
+            image_url: image_url ? parseInt(image_url) : null
         };
-
-        console.log('Insert data:', insertData);
-
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
         const query = `INSERT INTO events (${fields.join(', ')}) VALUES (${placeholders})`;
-        console.log('Insert Query:', query);
-
         pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
                 console.error('Create event error:', err);
@@ -409,7 +420,6 @@ app.post("/api/events", authenticateToken, upload.single('image'), (req, res) =>
                     error: process.env.NODE_ENV === 'development' ? err.message : undefined
                 });
             }
-
             res.status(201).json({
                 success: true,
                 message: 'Event created successfully',
@@ -895,19 +905,20 @@ app.get("/api/team/:id", (req, res) => {
 
 
 // Add new team member (with optional image upload, flexible file field)
-// Add new team member (expects photo_url as image ID from uploads table)
-app.post("/api/team", (req, res) => {
+app.post("/api/team", upload.any(), (req, res) => {
     try {
-        const { name, role, bio, photo_url } = req.body;
+        const { name, role, bio } = req.body;
         if (!name || !role || !bio) {
             return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
         }
-        // photo_url is the image ID from uploads table, or null
+        // Accept any file field name
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        const imagePath = file ? '/images/' + file.filename : '';
         const insertData = {
             name,
             role,
             bio,
-            photo_url: photo_url ? parseInt(photo_url) : null
+            photo_url: imagePath
         };
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
@@ -936,53 +947,39 @@ app.post("/api/team", (req, res) => {
 // Update team member (with optional image upload)
 
 // Update team member (with optional image upload, flexible file field)
-// Update team member (expects photo_url as image ID from uploads table)
-
-// Update team member (with optional image upload, deletes old image record from uploads table)
-app.put('/api/team/:id', upload.any(), async (req, res) => {
+app.put('/api/team/:id', upload.any(), (req, res) => {
     const memberId = req.params.id;
     const { name, role, bio } = req.body;
-
     if (!name || !role || !bio) {
         return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
     }
-
-    try {
-        // 1. Get the old photo URL
-        const [rows] = await pool.promise().query('SELECT photo_url FROM team_members WHERE id = ?', [memberId]);
-        const oldPhotoUrl = rows[0]?.photo_url || null;
-
-        // 2. Handle file upload
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        let newPhotoUrl = oldPhotoUrl;
-
-
-        if (file) {
-            // Save the uploaded file buffer to the uploads table
-            // Use the same logic as /upload route
-            const { originalname, mimetype, buffer } = file;
-            await pool.promise().query('INSERT INTO uploads (name, mimetype, data) VALUES (?, ?, ?)', [originalname, mimetype, buffer]);
-            newPhotoUrl = `/images/${file.originalname}`;
-
-            // 3. Delete old image from uploads table (by name column)
-            if (oldPhotoUrl && oldPhotoUrl.startsWith('/images/')) {
-                const oldFileName = oldPhotoUrl.split('/').pop();
-                await pool.promise().query('DELETE FROM uploads WHERE name = ?', [oldFileName]);
-            }
+    // If no new image, keep the old photo_url
+    pool.query('SELECT photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
+        if (err) {
+            console.error('Fetch old photo_url error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
         }
-
-        // 4. Update member with new data
-        await pool.promise().query(
-            'UPDATE team_members SET name = ?, role = ?, bio = ?, photo_url = ? WHERE id = ?',
-            [name, role, bio, newPhotoUrl, memberId]
-        );
-
-        return res.json({ success: true, message: 'Member updated successfully', photo_url: newPhotoUrl });
-
-    } catch (err) {
-        console.error('Update error:', err);
-        return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
-    }
+        let updateData = { name, role, bio };
+        // Accept any file field name
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            updateData.photo_url = `/images/${file.filename}`;
+        } else {
+            updateData.photo_url = results[0]?.photo_url || '';
+        }
+        const fields = Object.keys(updateData);
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE team_members SET ${setClause} WHERE id = ?`;
+        values.push(memberId);
+    pool.query(query, values, (err, result) => {
+            if (err) {
+                console.error('Update member error:', err);
+                return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
+            }
+            res.json({ success: true, message: 'Member updated successfully' });
+        });
+    });
 });
 
 // Delete a team member (superadmin only)
@@ -1002,20 +999,26 @@ app.get("/api/projects/:id", (req, res) => {
     });
 });
 
-app.post("/api/projects", authenticateToken, (req, res) => {
+app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
     try {
-        const { name, description, region, start_date, end_date, image_url } = req.body;
-        let insertData = {
-            name,
-            description,
-            region,
-            start_date,
-            end_date,
-            image_url: image_url ? parseInt(image_url) : null
-        };
+        console.log('--- Add Project Debug ---');
+        console.log('req.body:', req.body);
+        console.log('req.files:', req.files);
+        // Parse fields from req.body
+        const { name, description, region, start_date, end_date } = req.body;
+        let insertData = { name, description, region, start_date, end_date };
+        // Accept any file field name
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            insertData.image_url = `/images/${file.filename}`;
+        } else {
+            insertData.image_url = '';
+        }
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
         const query = `INSERT INTO projects (${fields.join(', ')}) VALUES (${placeholders})`;
+        console.log('Insert query:', query);
+        console.log('Insert values:', Object.values(insertData));
         pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
                 console.error('Add project error:', err);
@@ -1039,28 +1042,43 @@ app.post("/api/projects", authenticateToken, (req, res) => {
 
 
 // Update a project, with optional image upload
-app.put("/api/projects/:id", authenticateToken, (req, res) => {
+app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
     const projectId = req.params.id;
-    const { name, description, region, start_date, end_date, image_url } = req.body;
-    let updateData = {
-        name,
-        description,
-        region,
-        start_date,
-        end_date,
-        image_url: image_url ? parseInt(image_url) : null
-    };
-    const fields = Object.keys(updateData);
-    const values = fields.map(f => updateData[f]);
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    const query = `UPDATE projects SET ${setClause} WHERE id = ?`;
-    values.push(projectId);
-    pool.query(query, values, (err, result) => {
+    console.log('--- Edit Project Debug ---');
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files);
+    // Parse fields from req.body
+    const { title, description, ...otherFields } = req.body;
+    // Get old image_url if no new image is uploaded
+    pool.query('SELECT image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
         if (err) {
-            console.error('Update project error:', err);
+            console.error('Fetch old image_url error:', err);
             return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
         }
-        res.json({ success: true, message: 'Project updated successfully' });
+        let updateData = { ...otherFields };
+        if (title !== undefined) updateData.title = title;
+        if (description !== undefined) updateData.description = description;
+        // Accept any file field name
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            updateData.image_url = `/images/${file.filename}`;
+        } else {
+            updateData.image_url = results[0]?.image_url || '';
+        }
+        const fields = Object.keys(updateData);
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE projects SET ${setClause} WHERE id = ?`;
+        values.push(projectId);
+        console.log('Update query:', query);
+        console.log('Update values:', values);
+    pool.query(query, values, (err, result) => {
+            if (err) {
+                console.error('Update project error:', err);
+                return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
+            }
+            res.json({ success: true, message: 'Project updated successfully' });
+        });
     });
 });
 
@@ -1083,27 +1101,6 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
 });
 
 // ARTICLES CRUD
-// Download article document (BLOB)
-app.get("/api/articles/:id/download", (req, res) => {
-    const articleId = req.params.id;
-    pool.query("SELECT article, title FROM articles WHERE id = ?", [articleId], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Failed to fetch article document" });
-        }
-        if (!results || results.length === 0 || !results[0].article) {
-            return res.status(404).json({ error: "Article document not found" });
-        }
-        const buffer = results[0].article;
-        // Try to detect file type (default to PDF)
-        let mimeType = "application/pdf";
-        // Optionally, you can store mimetype in DB for more accuracy
-        // For now, default to PDF
-        const filename = `${results[0].title || 'article'}_${articleId}.pdf`;
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
-        res.send(buffer);
-    });
-});
 app.get("/api/articles/:id", (req, res) => {
     pool.query("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
@@ -1121,17 +1118,17 @@ app.post("/api/articles", authenticateToken, (req, res) => {
 
 app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
     const { title, content, author_name, created_at } = req.body;
-    // Only update fields that exist in the articles table
-    let updateFields = {};
-    if (title !== undefined) updateFields.title = title;
-    if (content !== undefined) updateFields.content = content;
-    if (author_name !== undefined) updateFields.author_name = author_name;
-    if (created_at !== undefined) updateFields.created_at = created_at;
-    if (req.file && req.file.mimetype === 'application/pdf') {
+    const updateFields = {
+        title,
+        content,
+        author_name,
+        created_at
+    };
+    if (req.file) {
         updateFields.article = req.file.buffer; // Store PDF as BLOB
     }
     pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
-        if (err) return res.status(500).json({ success: false, error: err.message });
+        if (err) return res.status(500).send(err);
         res.json({ success: true });
     });
 });
