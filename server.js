@@ -1,37 +1,3 @@
-// Update event route (JSON, image_url is uploads table ID)
-app.put("/api/events/:id", authenticateToken, (req, res) => {
-    try {
-    console.log('=== UPDATE EVENT DEBUG ===');
-    console.log('Body:', req.body);
-    console.log('File:', req.file);
-    const { title, description, event_date, image_url } = req.body;
-    const id = req.params.id;
-    // Validate required fields
-        let updateData = {
-            title: sanitizeForMySQL(title),
-            description: sanitizeForMySQL(description),
-    const fields = Object.keys(updateData).map(field => `${field} = ?`).join(', ');
-    const values = Object.values(updateData);
-    const query = `UPDATE events SET ${fields} WHERE id = ?`;
-        pool.query(query, values, (err, result) => {
-            if (err) {
-                console.error('Update event error:', err);
-            return res.status(200).json({
-                success: true,
-                message: 'Event updated successfully',
-                image_url: updateData.image_url,
-                data: {
-                    id,
-                    ...updateData
-                }
-            });
-        const insertData = {
-            title: sanitizeForMySQL(title),
-            description: sanitizeForMySQL(description),
-            event_date: sanitizeForMySQL(event_date),
-            image_url: image_url ? parseInt(image_url) : null
-        };
-
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -381,6 +347,57 @@ app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (re
     });
 });
 
+
+// Update event route (JSON, image_url is uploads table ID)
+app.put("/api/events/:id", authenticateToken, (req, res) => {
+    try {
+        const { title, description, event_date, image_url } = req.body;
+        const id = req.params.id;
+        // Validate required fields
+        if (!title || !sanitizeForMySQL(title)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Title is required'
+            });
+        }
+        let updateData = {
+            title: sanitizeForMySQL(title),
+            description: sanitizeForMySQL(description),
+            event_date: sanitizeForMySQL(event_date),
+            image_url: image_url ? parseInt(image_url) : null
+        };
+        const fields = Object.keys(updateData).map(field => `${field} = ?`).join(', ');
+        const values = Object.values(updateData);
+        const query = `UPDATE events SET ${fields} WHERE id = ?`;
+        values.push(id);
+        pool.query(query, values, (err, result) => {
+            if (err) {
+                console.error('Update event error:', err);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to update event',
+                    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+                });
+            }
+            return res.status(200).json({
+                success: true,
+                message: 'Event updated successfully',
+                image_url: updateData.image_url,
+                data: {
+                    id,
+                    ...updateData
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Update event error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update event',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
 
 // For all other routes
 app.use((req, res, next) => {
