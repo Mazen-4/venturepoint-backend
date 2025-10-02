@@ -25,12 +25,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// // Serve PDFs from articles folder
-// app.use('/articles', express.static(path.join(__dirname, 'articles')));
-
-// // Register article upload route
-// const articleRouter = require('./routes/article');
-// app.use('/api/articles', articleRouter);
+// PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
 
 
 const fileFilter = (req, file, cb) => {
@@ -1086,9 +1081,22 @@ app.post("/api/articles", authenticateToken, (req, res) => {
 });
 
 app.put("/api/articles/:id", authenticateToken, (req, res) => {
-    pool.query("UPDATE articles SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
-        if (err) return res.status(500).send(err);
-        res.json({ success: true });
+    const pdfUpload = multer({ storage: multer.memoryStorage() });
+    app.put("/api/articles/:id", authenticateToken, pdfUpload.single('article_pdf'), (req, res) => {
+        const { title, content, author_name, created_at } = req.body;
+        const updateFields = {
+            title,
+            content,
+            author_name,
+            created_at
+        };
+        if (req.file) {
+            updateFields.article = req.file.buffer; // Store PDF as BLOB
+        }
+        pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
+            if (err) return res.status(500).send(err);
+            res.json({ success: true });
+        });
     });
 });
 
