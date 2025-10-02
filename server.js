@@ -895,20 +895,19 @@ app.get("/api/team/:id", (req, res) => {
 
 
 // Add new team member (with optional image upload, flexible file field)
-app.post("/api/team", upload.any(), (req, res) => {
+// Add new team member (expects photo_url as image ID from uploads table)
+app.post("/api/team", (req, res) => {
     try {
-        const { name, role, bio } = req.body;
+        const { name, role, bio, photo_url } = req.body;
         if (!name || !role || !bio) {
             return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
         }
-        // Accept any file field name
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        const imagePath = file ? '/images/' + file.filename : '';
+        // photo_url is the image ID from uploads table, or null
         const insertData = {
             name,
             role,
             bio,
-            photo_url: imagePath
+            photo_url: photo_url ? parseInt(photo_url) : null
         };
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
@@ -937,22 +936,23 @@ app.post("/api/team", upload.any(), (req, res) => {
 // Update team member (with optional image upload)
 
 // Update team member (with optional image upload, flexible file field)
-app.put('/api/team/:id', upload.any(), (req, res) => {
+// Update team member (expects photo_url as image ID from uploads table)
+app.put('/api/team/:id', (req, res) => {
     const memberId = req.params.id;
-    const { name, role, bio } = req.body;
+    const { name, role, bio, photo_url } = req.body;
     if (!name || !role || !bio) {
         return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
     }
-    pool.query('SELECT photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        const oldPhoto = results[0]?.photo_url || '';
-        const file = req.files && req.files.length > 0 ? req.files[0] : null;
-        const newPhoto = file ? `/images/${file.filename}` : oldPhoto;
-        const updateData = { name, role, bio, photo_url: newPhoto };
-        pool.query('UPDATE team_members SET ? WHERE id = ?', [updateData, memberId], (err2) => {
-            if (err2) return res.status(500).json({ success: false, message: 'Failed to update', error: err2.message });
-            res.json({ success: true, message: 'Member updated successfully', photo_url: newPhoto });
-        });
+    // photo_url is the image ID from uploads table, or null
+    const updateData = {
+        name,
+        role,
+        bio,
+        photo_url: photo_url ? parseInt(photo_url) : null
+    };
+    pool.query('UPDATE team_members SET ? WHERE id = ?', [updateData, memberId], (err2) => {
+        if (err2) return res.status(500).json({ success: false, message: 'Failed to update member', error: err2.message });
+        res.json({ success: true, message: 'Member updated successfully' });
     });
 });
 
