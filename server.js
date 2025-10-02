@@ -26,16 +26,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadDir = path.join(__dirname, 'images');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-        cb(null, uploadDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
 const fileFilter = (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
         cb(null, true);
@@ -44,9 +34,9 @@ const fileFilter = (req, file, cb) => {
     }
 };
 const upload = multer({
-    storage,
-    fileFilter,
-    limits: { fileSize: 100 * 1024 * 1024 }
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter, // keep existing filter
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -82,6 +72,28 @@ app.use('/api/events', (req, res, next) => {
     express.json()(req, res, () => {
         express.urlencoded({ extended: true })(req, res, next);
     });
+});
+
+// Handling uploads on the database nto render
+app.post('/upload', upload.single('image'), async (req, res) => {
+  const { originalname, mimetype, buffer } = req.file;
+
+  try {
+    const [result] = await db.query(
+      'INSERT INTO uploads (name, mimetype, data) VALUES (?, ?, ?)',
+      [originalname, mimetype, buffer]
+    );
+
+    const newId = result.insertId;
+    res.json({
+      id: newId,
+      message: 'Image uploaded successfully',
+      url: `/image/${newId}` // you can use this directly in <img src="">
+    });
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
 });
 
 
