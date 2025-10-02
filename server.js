@@ -937,23 +937,47 @@ app.post("/api/team", (req, res) => {
 
 // Update team member (with optional image upload, flexible file field)
 // Update team member (expects photo_url as image ID from uploads table)
-app.put('/api/team/:id', (req, res) => {
+
+// Update team member (with optional image upload, deletes old image record from uploads table)
+app.put('/api/team/:id', upload.any(), async (req, res) => {
     const memberId = req.params.id;
-    const { name, role, bio, photo_url } = req.body;
+    const { name, role, bio } = req.body;
+
     if (!name || !role || !bio) {
         return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
     }
-    // photo_url is the image ID from uploads table, or null
-    const updateData = {
-        name,
-        role,
-        bio,
-        photo_url: photo_url ? parseInt(photo_url) : null
-    };
-    pool.query('UPDATE team_members SET ? WHERE id = ?', [updateData, memberId], (err2) => {
-        if (err2) return res.status(500).json({ success: false, message: 'Failed to update member', error: err2.message });
-        res.json({ success: true, message: 'Member updated successfully' });
-    });
+
+    try {
+        // 1. Get the old photo URL
+        const [rows] = await pool.promise().query('SELECT photo_url FROM team_members WHERE id = ?', [memberId]);
+        const oldPhotoUrl = rows[0]?.photo_url || null;
+
+        // 2. Handle file upload
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        let newPhotoUrl = oldPhotoUrl;
+
+        if (file) {
+            newPhotoUrl = `/images/${file.filename}`;
+
+            // 3. Delete old image from uploads table
+            if (oldPhotoUrl && oldPhotoUrl.startsWith('/images/')) {
+                const oldFileName = oldPhotoUrl.split('/').pop();
+                await pool.promise().query('DELETE FROM uploads WHERE filename = ?', [oldFileName]);
+            }
+        }
+
+        // 4. Update member with new data
+        await pool.promise().query(
+            'UPDATE team_members SET name = ?, role = ?, bio = ?, photo_url = ? WHERE id = ?',
+            [name, role, bio, newPhotoUrl, memberId]
+        );
+
+        return res.json({ success: true, message: 'Member updated successfully', photo_url: newPhotoUrl });
+
+    } catch (err) {
+        console.error('Update error:', err);
+        return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
+    }
 });
 
 // Delete a team member (superadmin only)
