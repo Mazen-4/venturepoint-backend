@@ -1,3 +1,4 @@
+
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -97,6 +98,22 @@ app.post('/upload', upload.single('image'), (req, res) => {
     });
 });
 
+// GET image by ID (from uploads table)
+app.get('/image/:id', (req, res) => {
+    const { id } = req.params;
+    pool.query('SELECT mimetype, data FROM uploads WHERE id = ?', [id], (err, results) => {
+        if (err) {
+            console.error('Image fetch error:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) {
+            return res.status(404).json({ error: 'Image not found' });
+        }
+        const { mimetype, data } = results[0];
+        res.setHeader('Content-Type', mimetype || 'image/jpeg');
+        res.send(data);
+    });
+});
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
