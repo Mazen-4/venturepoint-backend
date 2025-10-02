@@ -943,31 +943,15 @@ app.put('/api/team/:id', upload.any(), (req, res) => {
     if (!name || !role || !bio) {
         return res.status(400).json({ success: false, message: 'Name, role, and bio are required.' });
     }
-    // If no new image, keep the old photo_url
     pool.query('SELECT photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
-        if (err) {
-            console.error('Fetch old photo_url error:', err);
-            return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
-        }
-        let updateData = { name, role, bio };
-        // Accept any file field name
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            updateData.photo_url = `/images/${file.filename}`;
-        } else {
-            updateData.photo_url = results[0]?.photo_url || '';
-        }
-        const fields = Object.keys(updateData);
-        const values = fields.map(f => updateData[f]);
-        const setClause = fields.map(f => `${f} = ?`).join(', ');
-        const query = `UPDATE team_members SET ${setClause} WHERE id = ?`;
-        values.push(memberId);
-    pool.query(query, values, (err, result) => {
-            if (err) {
-                console.error('Update member error:', err);
-                return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
-            }
-            res.json({ success: true, message: 'Member updated successfully' });
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        const oldPhoto = results[0]?.photo_url || '';
+        const file = req.files && req.files.length > 0 ? req.files[0] : null;
+        const newPhoto = file ? `/images/${file.filename}` : oldPhoto;
+        const updateData = { name, role, bio, photo_url: newPhoto };
+        pool.query('UPDATE team_members SET ? WHERE id = ?', [updateData, memberId], (err2) => {
+            if (err2) return res.status(500).json({ success: false, message: 'Failed to update', error: err2.message });
+            res.json({ success: true, message: 'Member updated successfully', photo_url: newPhoto });
         });
     });
 });
