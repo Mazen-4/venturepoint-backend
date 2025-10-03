@@ -633,7 +633,20 @@ app.get("/api/services", (req, res) => {
 app.get("/api/team", (req, res) => {
     pool.query("SELECT * FROM team_members", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json(results);
+        // Build photo_url for rows that have photo data or a path
+        const mapped = results.map(r => {
+            const hasBlob = r.photo_data && r.photo_data.length > 0;
+            const hasPath = r.photo_url && r.photo_url !== '';
+            if (hasBlob) {
+                return { ...r, photo_url: `/api/team/${r.id}/photo` };
+            }
+            if (hasPath) {
+                // keep existing path as-is (likely /images/..)
+                return r;
+            }
+            return r;
+        });
+        res.json(mapped);
     });
 });
 
@@ -930,13 +943,17 @@ app.post("/api/team", upload.any(), (req, res) => {
         }
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        const imagePath = file ? '/images/' + file.filename : '';
-        const insertData = {
-            name,
-            role,
-            bio,
-            photo_url: imagePath
-        };
+        const insertData = { name, role, bio };
+        if (file) {
+            // multer memoryStorage buffer exists at file.buffer
+            insertData.photo_name = file.originalname || file.filename || null;
+            insertData.photo_mimetype = file.mimetype || null;
+            insertData.photo_data = file.buffer || null;
+            // photo_url will be set after insert as endpoint
+            insertData.photo_url = '';
+        } else {
+            insertData.photo_url = '';
+        }
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
         const query = `INSERT INTO team_members (${fields.join(', ')}) VALUES (${placeholders})`;
@@ -945,15 +962,34 @@ app.post("/api/team", upload.any(), (req, res) => {
                 console.error('Add member error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to add member', error: err.message });
             }
-            res.status(201).json({ 
-                success: true, 
-                message: 'Member added successfully', 
-                id: result.insertId, 
-                member: { 
-                    ...insertData, 
-                    id: result.insertId 
-                } 
-            });
+            const newId = result.insertId;
+            if (file) {
+                // update photo_url to the photo endpoint
+                pool.query('UPDATE team_members SET photo_url = ? WHERE id = ?', [`/api/team/${newId}/photo`, newId], (uerr) => {
+                    if (uerr) console.error('Failed to set photo_url after insert:', uerr);
+                    // respond with member including photo_url endpoint
+                    res.status(201).json({
+                        success: true,
+                        message: 'Member added successfully',
+                        id: newId,
+                        member: {
+                            ...insertData,
+                            photo_url: `/api/team/${newId}/photo`,
+                            id: newId
+                        }
+                    });
+                });
+            } else {
+                res.status(201).json({ 
+                    success: true, 
+                    message: 'Member added successfully', 
+                    id: newId, 
+                    member: { 
+                        ...insertData, 
+                        id: newId 
+                    } 
+                });
+            }
         });
     } catch (error) {
         console.error('Add member error:', error);
@@ -980,7 +1016,10 @@ app.put('/api/team/:id', upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            updateData.photo_url = `/images/${file.filename}`;
+            updateData.photo_name = file.originalname || file.filename || null;
+            updateData.photo_mimetype = file.mimetype || null;
+            updateData.photo_data = file.buffer || null;
+            updateData.photo_url = `/api/team/${memberId}/photo`;
         } else {
             updateData.photo_url = results[0]?.photo_url || '';
         }
@@ -1328,4 +1367,32 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
+});
+
+// Serve team member photo from DB blob or filesystem path
+app.get('/api/team/:id/photo', (req, res) => {
+    const memberId = req.params.id;
+    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
+        if (err) {
+            console.error('Error fetching member photo:', err);
+            return res.status(500).json({ error: 'Failed to load photo' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
+        const r = results[0];
+        if (r.photo_data && r.photo_data.length > 0) {
+            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
+            return res.send(r.photo_data);
+        }
+        // Fallback to filesystem path if exists
+        if (r.photo_url && r.photo_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.photo_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+        return res.status(404).json({ error: 'Photo not found' });
+    });
 });
