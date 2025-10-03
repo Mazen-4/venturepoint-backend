@@ -637,14 +637,16 @@ app.get("/api/team", (req, res) => {
         const mapped = results.map(r => {
             const hasBlob = r.photo_data && r.photo_data.length > 0;
             const hasPath = r.photo_url && r.photo_url !== '';
+            // build output object without binary fields
+            const out = { ...r };
+            delete out.photo_data;
+            delete out.photo_mimetype;
+            delete out.photo_name;
             if (hasBlob) {
-                return { ...r, photo_url: `/api/team/${r.id}/photo` };
+                out.photo_url = `/api/team/${r.id}/photo`;
             }
-            if (hasPath) {
-                // keep existing path as-is (likely /images/..)
-                return r;
-            }
-            return r;
+            // if hasPath and no blob, keep photo_url as-is
+            return out;
         });
         res.json(mapped);
     });
@@ -1380,8 +1382,10 @@ app.get('/api/team/:id/photo', (req, res) => {
         if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
         const r = results[0];
         if (r.photo_data && r.photo_data.length > 0) {
+            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
             res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
-            return res.send(r.photo_data);
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
         }
         // Fallback to filesystem path if exists
         if (r.photo_url && r.photo_url.startsWith('/images/')) {
