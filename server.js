@@ -1381,8 +1381,11 @@ app.get('/api/team/:id/photo', (req, res) => {
         }
         if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
         const r = results[0];
-        if (r.photo_data && r.photo_data.length > 0) {
+        const hasBlob = r.photo_data && r.photo_data.length > 0;
+        console.log(`[PHOTO] request for member ${memberId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
+        if (hasBlob) {
             const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
+            console.log(`[PHOTO] sending buffer for member ${memberId}, length=${buf.length}`);
             res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
             res.setHeader('Content-Length', buf.length);
             return res.send(buf);
