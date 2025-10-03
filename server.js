@@ -873,7 +873,19 @@ app.get("/api/projects", (req, res) => {
 app.get("/api/articles", (req, res) => {
     pool.query("SELECT * FROM articles", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json(results);
+        // map blob rows to article endpoint and remove binary fields
+        const mapped = results.map(r => {
+            const hasBlob = r.article && r.article.length > 0;
+            const out = { ...r };
+            delete out.article;
+            delete out.article_mimetype;
+            delete out.article_name;
+            if (hasBlob) {
+                out.article_url = `/api/articles/${r.id}/file`;
+            }
+            return out;
+        });
+        res.json(mapped);
     });
 });
 
@@ -1459,7 +1471,16 @@ app.get("/api/articles/:id", (req, res) => {
     pool.query("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
-        res.json(results[0]);
+        const r = results[0];
+        const out = { ...r };
+        // Remove binary fields and provide a file endpoint if blob exists
+        delete out.article;
+        delete out.article_mimetype;
+        delete out.article_name;
+        if (r.article && r.article.length > 0) {
+            out.article_url = `/api/articles/${r.id}/file`;
+        }
+        res.json(out);
     });
 });
 
@@ -1491,6 +1512,40 @@ app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (r
     pool.query("DELETE FROM articles WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
+    });
+});
+
+// Serve article file (PDF or other) from DB blob or filesystem path
+app.get('/api/articles/:id/file', (req, res) => {
+    const articleId = req.params.id;
+    pool.query('SELECT article, article_mimetype, article_name, article_url FROM articles WHERE id = ?', [articleId], (err, results) => {
+        if (err) {
+            console.error('Error fetching article file:', err);
+            return res.status(500).json({ error: 'Failed to load article file' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Article not found' });
+        const r = results[0];
+        const hasBlob = r.article && r.article.length > 0;
+        console.log(`[ARTICLE FILE] request for article ${articleId} - hasBlob=${!!hasBlob} mimetype=${r.article_mimetype} url=${r.article_url}`);
+        if (hasBlob) {
+            const buf = Buffer.isBuffer(r.article) ? r.article : Buffer.from(r.article);
+            // Set headers for download with original filename if available
+            res.setHeader('Content-Type', r.article_mimetype || 'application/pdf');
+            if (r.article_name) res.setHeader('Content-Disposition', `attachment; filename="${r.article_name}"`);
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+        // Fallback: if article_url points to a filesystem path
+        if (r.article_url && r.article_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.article_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send article file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+        return res.status(404).json({ error: 'Article file not found' });
     });
 });
 
