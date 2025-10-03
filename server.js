@@ -1048,6 +1048,39 @@ app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, 
     });
 });
 
+// Serve team member photo from DB blob or filesystem path
+app.get('/api/team/:id/photo', (req, res) => {
+    const memberId = req.params.id;
+    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
+        if (err) {
+            console.error('Error fetching member photo:', err);
+            return res.status(500).json({ error: 'Failed to load photo' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
+        const r = results[0];
+        const hasBlob = r.photo_data && r.photo_data.length > 0;
+        console.log(`[PHOTO] request for member ${memberId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
+        if (hasBlob) {
+            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
+            console.log(`[PHOTO] sending buffer for member ${memberId}, length=${buf.length}`);
+            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+        // Fallback to filesystem path if exists
+        if (r.photo_url && r.photo_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.photo_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+        return res.status(404).json({ error: 'Photo not found' });
+    });
+});
+
 // PROJECTS CRUD
 app.get("/api/projects/:id", (req, res) => {
     pool.query("SELECT * FROM projects WHERE id = ?", [req.params.id], (err, results) => {
@@ -1369,37 +1402,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
-});
-
-// Serve team member photo from DB blob or filesystem path
-app.get('/api/team/:id/photo', (req, res) => {
-    const memberId = req.params.id;
-    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
-        if (err) {
-            console.error('Error fetching member photo:', err);
-            return res.status(500).json({ error: 'Failed to load photo' });
-        }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
-        const r = results[0];
-        const hasBlob = r.photo_data && r.photo_data.length > 0;
-        console.log(`[PHOTO] request for member ${memberId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
-            console.log(`[PHOTO] sending buffer for member ${memberId}, length=${buf.length}`);
-            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        // Fallback to filesystem path if exists
-        if (r.photo_url && r.photo_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.photo_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
-        }
-        return res.status(404).json({ error: 'Photo not found' });
-    });
 });
