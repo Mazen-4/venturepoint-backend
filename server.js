@@ -656,7 +656,18 @@ app.get("/api/team", (req, res) => {
 app.get("/api/projects", (req, res) => {
     pool.query("SELECT * FROM projects", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json(results);
+        const mapped = results.map(r => {
+            const hasBlob = r.image_data && r.image_data.length > 0;
+            const out = { ...r };
+            delete out.image_data;
+            delete out.image_mimetype;
+            delete out.image_name;
+            if (hasBlob) {
+                out.image_url = `/api/projects/${r.id}/image`;
+            }
+            return out;
+        });
+        res.json(mapped);
     });
 });
 
@@ -1101,7 +1112,10 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            insertData.image_url = `/images/${file.filename}`;
+            insertData.image_name = file.originalname || file.filename || null;
+            insertData.image_mimetype = file.mimetype || null;
+            insertData.image_data = file.buffer || null;
+            insertData.image_url = '';
         } else {
             insertData.image_url = '';
         }
@@ -1115,15 +1129,32 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
                 console.error('Add project error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to add project', error: err.message });
             }
-            res.status(201).json({ 
-                success: true, 
-                message: 'Project added successfully', 
-                id: result.insertId, 
-                project: { 
-                    ...insertData, 
-                    id: result.insertId 
-                } 
-            });
+            const newId = result.insertId;
+            if (file) {
+                pool.query('UPDATE projects SET image_url = ? WHERE id = ?', [`/api/projects/${newId}/image`, newId], (uerr) => {
+                    if (uerr) console.error('Failed to set image_url after insert:', uerr);
+                    return res.status(201).json({
+                        success: true,
+                        message: 'Project added successfully',
+                        id: newId,
+                        project: {
+                            ...insertData,
+                            image_url: `/api/projects/${newId}/image`,
+                            id: newId
+                        }
+                    });
+                });
+            } else {
+                res.status(201).json({ 
+                    success: true, 
+                    message: 'Project added successfully', 
+                    id: newId, 
+                    project: { 
+                        ...insertData, 
+                        id: newId 
+                    } 
+                });
+            }
         });
     } catch (error) {
         console.error('Add project error:', error);
@@ -1152,7 +1183,10 @@ app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
         // Accept any file field name
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            updateData.image_url = `/images/${file.filename}`;
+            updateData.image_name = file.originalname || file.filename || null;
+            updateData.image_mimetype = file.mimetype || null;
+            updateData.image_data = file.buffer || null;
+            updateData.image_url = `/api/projects/${projectId}/image`;
         } else {
             updateData.image_url = results[0]?.image_url || '';
         }
@@ -1188,6 +1222,37 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
             return res.status(404).json({ error: "Project not found" });
         }
         return res.json({ success: true, message: "Project deleted successfully" });
+    });
+});
+
+// Serve project image from DB blob or filesystem path
+app.get('/api/projects/:id/image', (req, res) => {
+    const projectId = req.params.id;
+    pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
+        if (err) {
+            console.error('Error fetching project image:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Project not found' });
+        const r = results[0];
+        const hasBlob = r.image_data && r.image_data.length > 0;
+        console.log(`[PROJECT IMAGE] request for project ${projectId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
+        if (hasBlob) {
+            const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
+            res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+        if (r.image_url && r.image_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.image_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+        return res.status(404).json({ error: 'Image not found' });
     });
 });
 
