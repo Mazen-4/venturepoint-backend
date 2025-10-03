@@ -348,55 +348,163 @@ app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (re
 });
 
 
-// Update event route (JSON, image_url is uploads table ID)
-app.put("/api/events/:id", authenticateToken, (req, res) => {
-    try {
-        const { title, description, event_date, image_url } = req.body;
-        const id = req.params.id;
-        // Validate required fields
-        if (!title || !sanitizeForMySQL(title)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Title is required'
-            });
+// EVENTS CRUD - consolidated handlers that store images as DB blobs
+// Get all events (public) - map blob rows to image endpoint and strip binary fields
+app.get("/api/events", (req, res) => {
+    pool.query("SELECT * FROM events", (err, results) => {
+        if (err) return res.status(500).send(err);
+        const mapped = results.map(r => {
+            const hasBlob = r.image_data && r.image_data.length > 0;
+            const out = { ...r };
+            delete out.image_data;
+            delete out.image_mimetype;
+            delete out.image_name;
+            if (hasBlob) {
+                out.image_url = `/api/events/${r.id}/image`;
+            }
+            return out;
+        });
+        res.json(mapped);
+    });
+});
+
+// Get single event (public) - strip blob fields and map image endpoint
+app.get("/api/events/:id", (req, res) => {
+    pool.query("SELECT * FROM events WHERE id = ?", [req.params.id], (err, results) => {
+        if (err) return res.status(500).send(err);
+        if (results.length === 0) return res.status(404).json({ error: "Not found" });
+        const r = results[0];
+        const out = { ...r };
+        delete out.image_data;
+        delete out.image_mimetype;
+        delete out.image_name;
+        if (r.image_data && r.image_data.length > 0) {
+            out.image_url = `/api/events/${r.id}/image`;
         }
-        let updateData = {
-            title: sanitizeForMySQL(title),
-            description: sanitizeForMySQL(description),
-            event_date: sanitizeForMySQL(event_date),
-            image_url: image_url ? parseInt(image_url) : null
-        };
-        const fields = Object.keys(updateData).map(field => `${field} = ?`).join(', ');
-        const values = Object.values(updateData);
-        const query = `UPDATE events SET ${fields} WHERE id = ?`;
-        values.push(id);
+        res.json(out);
+    });
+});
+
+// Create a new event with optional image upload (multipart/form-data)
+app.post("/api/events", authenticateToken, upload.any(), (req, res) => {
+    try {
+        console.log('--- Add Event Debug ---');
+        console.log('req.body:', req.body);
+        console.log('req.files:', req.files);
+        const { title, description, event_date } = req.body;
+        if (!title) return res.status(400).json({ error: 'Title required' });
+        let insertData = { title, description, event_date };
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            insertData.image_name = file.originalname || file.filename || null;
+            insertData.image_mimetype = file.mimetype || null;
+            insertData.image_data = file.buffer || null;
+            insertData.image_url = '';
+        } else {
+            insertData.image_url = '';
+        }
+        const fields = Object.keys(insertData);
+        const placeholders = fields.map(() => '?').join(', ');
+        const query = `INSERT INTO events (${fields.join(', ')}) VALUES (${placeholders})`;
+        pool.query(query, Object.values(insertData), (err, result) => {
+            if (err) {
+                console.error('Add event error:', err);
+                return res.status(500).json({ success: false, message: 'Failed to add event', error: err.message });
+            }
+            const newId = result.insertId;
+            if (file) {
+                pool.query('UPDATE events SET image_url = ? WHERE id = ?', [`/api/events/${newId}/image`, newId], (uerr) => {
+                    if (uerr) console.error('Failed to set image_url after insert:', uerr);
+                    return res.status(201).json({
+                        success: true,
+                        message: 'Event added successfully',
+                        id: newId,
+                        event: { ...insertData, image_url: `/api/events/${newId}/image`, id: newId }
+                    });
+                });
+            } else {
+                res.status(201).json({ success: true, message: 'Event added successfully', id: newId, event: { ...insertData, id: newId } });
+            }
+        });
+    } catch (error) {
+        console.error('Add event error:', error);
+        res.status(500).json({ success: false, message: 'Failed to add event', error: error.message });
+    }
+});
+
+// Update an event, with optional image upload
+app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
+    const eventId = req.params.id;
+    console.log('--- Edit Event Debug ---');
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files);
+    const { title, description, event_date } = req.body;
+    // Get old image_url if no new image is uploaded
+    pool.query('SELECT image_url FROM events WHERE id = ?', [eventId], (err, results) => {
+        if (err) {
+            console.error('Fetch old image_url error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Event not found' });
+        let updateData = {};
+        if (title !== undefined) updateData.title = title;
+        if (description !== undefined) updateData.description = description;
+        if (event_date !== undefined) updateData.event_date = event_date;
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            updateData.image_name = file.originalname || file.filename || null;
+            updateData.image_mimetype = file.mimetype || null;
+            updateData.image_data = file.buffer || null;
+            updateData.image_url = `/api/events/${eventId}/image`;
+        } else {
+            updateData.image_url = results[0]?.image_url || '';
+        }
+        const fields = Object.keys(updateData);
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE events SET ${setClause} WHERE id = ?`;
+        values.push(eventId);
+        console.log('Update query:', query);
+        console.log('Update values:', values);
         pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Update event error:', err);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Failed to update event',
-                    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-                });
+                return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
             }
-            return res.status(200).json({
-                success: true,
-                message: 'Event updated successfully',
-                image_url: updateData.image_url,
-                data: {
-                    id,
-                    ...updateData
+            res.json({ success: true, message: 'Event updated successfully' });
+        });
+    });
+});
+
+// Serve event image from DB blob or filesystem path
+app.get('/api/events/:id/image', (req, res) => {
+    const eventId = req.params.id;
+    pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM events WHERE id = ?', [eventId], (err, results) => {
+        if (err) {
+            console.error('Error fetching event image:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Event not found' });
+        const r = results[0];
+        const hasBlob = r.image_data && r.image_data.length > 0;
+        console.log(`[EVENT IMAGE] request for event ${eventId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
+        if (hasBlob) {
+            const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
+            res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+        if (r.image_url && r.image_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.image_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send file fallback:', sendErr);
+                    res.status(500).end();
                 }
             });
-        });
-    } catch (error) {
-        console.error('Update event error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update event',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
+        }
+        return res.status(404).json({ error: 'Image not found' });
+    });
 });
 
 // For all other routes
