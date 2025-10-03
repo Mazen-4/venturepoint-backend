@@ -211,14 +211,13 @@ app.get("/api/authors", (req, res) => {
 app.get('/api/advisors', (req, res) => {
     console.log('Fetching advisors from database...');
     const query = `
-        SELECT id, name, area_of_focus, bio, photo_url 
+        SELECT *
         FROM advisors 
         ORDER BY area_of_focus, name
     `;
     pool.query(query, (err, results) => {
         if (err) {
             console.error('Error fetching advisors:', err);
-            // Log more details for debugging
             try {
                 require('fs').appendFileSync('advisors-error.log', `\n[${new Date().toISOString()}] QUERY: ${query}\nERROR: ${JSON.stringify(err)}\nCONNECTION STATE: ${JSON.stringify(pool.config)}\n`);
             } catch (logErr) {
@@ -231,8 +230,20 @@ app.get('/api/advisors', (req, res) => {
                 stack: err.stack || null
             });
         }
-        console.log(`Found ${results.length} advisors`);
-        res.json(results);
+        // map blob rows to photo endpoint and remove binary fields
+        const mapped = results.map(r => {
+            const hasBlob = r.photo_data && r.photo_data.length > 0;
+            const out = { ...r };
+            delete out.photo_data;
+            delete out.photo_mimetype;
+            delete out.photo_name;
+            if (hasBlob) {
+                out.photo_url = `/api/advisors/${r.id}/photo`;
+            }
+            return out;
+        });
+        console.log(`Found ${mapped.length} advisors`);
+        res.json(mapped);
     });
 });
 
@@ -241,7 +252,7 @@ app.get('/api/advisors/:id', (req, res) => {
     const advisorId = req.params.id;
     console.log(`Fetching advisor with ID: ${advisorId}`);
     const query = `
-        SELECT id, name, area_of_focus, bio, photo_url 
+        SELECT *
         FROM advisors 
         WHERE id = ?
     `;
@@ -256,41 +267,120 @@ app.get('/api/advisors/:id', (req, res) => {
         if (results.length === 0) {
             return res.status(404).json({ error: 'Advisor not found' });
         }
-        console.log(`Found advisor: ${results[0].name}`);
-        res.json(results[0]);
+        const r = results[0];
+        const out = { ...r };
+        delete out.photo_data;
+        delete out.photo_mimetype;
+        delete out.photo_name;
+        if (r.photo_data && r.photo_data.length > 0) {
+            out.photo_url = `/api/advisors/${r.id}/photo`;
+        }
+        console.log(`Found advisor: ${r.name}`);
+        res.json(out);
     });
 });
 
 // POST /api/advisors - Create a new advisor (admin/superadmin, with image upload)
-app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('photo'), (req, res) => {
-    const { name, area_of_focus, bio } = req.body;
-    if (!name || !area_of_focus || !bio) {
-        return res.status(400).json({ error: 'Name, area_of_focus, and bio are required' });
-    }
-    let photo_url = req.file ? `/images/${req.file.filename}` : '';
-    const query = 'INSERT INTO advisors (name, area_of_focus, bio, photo_url) VALUES (?, ?, ?, ?)';
-    pool.query(query, [name, area_of_focus, bio, photo_url], (err, result) => {
-        if (err) {
-            return res.status(500).json({ error: 'Failed to create advisor', details: err.message });
+app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    try {
+        const { name, area_of_focus, bio } = req.body;
+        if (!name || !area_of_focus || !bio) {
+            return res.status(400).json({ error: 'Name, area_of_focus, and bio are required' });
         }
-        res.status(201).json({ success: true, id: result.insertId });
-    });
+        let insertData = { name, area_of_focus, bio };
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            insertData.photo_name = file.originalname || file.filename || null;
+            insertData.photo_mimetype = file.mimetype || null;
+            insertData.photo_data = file.buffer || null;
+            insertData.photo_url = '';
+        } else {
+            insertData.photo_url = '';
+        }
+        const fields = Object.keys(insertData);
+        const placeholders = fields.map(() => '?').join(', ');
+        const query = `INSERT INTO advisors (${fields.join(', ')}) VALUES (${placeholders})`;
+        pool.query(query, Object.values(insertData), (err, result) => {
+            if (err) {
+                console.error('Create advisor error:', err);
+                return res.status(500).json({ error: 'Failed to create advisor', details: err.message });
+            }
+            const newId = result.insertId;
+            if (file) {
+                pool.query('UPDATE advisors SET photo_url = ? WHERE id = ?', [`/api/advisors/${newId}/photo`, newId], (uerr) => {
+                    if (uerr) console.error('Failed to set photo_url after insert:', uerr);
+                    return res.status(201).json({ success: true, id: newId, advisor: { ...insertData, photo_url: `/api/advisors/${newId}/photo`, id: newId } });
+                });
+            } else {
+                res.status(201).json({ success: true, id: newId, advisor: { ...insertData, id: newId } });
+            }
+        });
+    } catch (error) {
+        console.error('Create advisor error:', error);
+        res.status(500).json({ error: 'Failed to create advisor', details: error.message });
+    }
 });
 
 // PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
-app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('photo'), (req, res) => {
+app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     const advisorId = req.params.id;
     const { name, area_of_focus, bio } = req.body;
-    // Get old photo_url if no new photo is uploaded
     pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
-        let photo_url = req.file ? `/images/${req.file.filename}` : results[0]?.photo_url || '';
-        const query = 'UPDATE advisors SET name = ?, area_of_focus = ?, bio = ?, photo_url = ? WHERE id = ?';
-        pool.query(query, [name, area_of_focus, bio, photo_url, advisorId], (err, result) => {
+        let updateData = {};
+        if (name !== undefined) updateData.name = name;
+        if (area_of_focus !== undefined) updateData.area_of_focus = area_of_focus;
+        if (bio !== undefined) updateData.bio = bio;
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            updateData.photo_name = file.originalname || file.filename || null;
+            updateData.photo_mimetype = file.mimetype || null;
+            updateData.photo_data = file.buffer || null;
+            updateData.photo_url = `/api/advisors/${advisorId}/photo`;
+        } else {
+            updateData.photo_url = results[0]?.photo_url || '';
+        }
+        const fields = Object.keys(updateData);
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE advisors SET ${setClause} WHERE id = ?`;
+        values.push(advisorId);
+        pool.query(query, values, (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true, message: 'Advisor updated successfully' });
         });
+    });
+});
+
+// Serve advisor photo from DB blob or filesystem path
+app.get('/api/advisors/:id/photo', (req, res) => {
+    const advisorId = req.params.id;
+    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
+        if (err) {
+            console.error('Error fetching advisor photo:', err);
+            return res.status(500).json({ error: 'Failed to load photo' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
+        const r = results[0];
+        const hasBlob = r.photo_data && r.photo_data.length > 0;
+        console.log(`[ADVISOR PHOTO] request for ${advisorId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
+        if (hasBlob) {
+            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
+            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+        if (r.photo_url && r.photo_url.startsWith('/images/')) {
+            const filePath = path.join(__dirname, r.photo_url);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+        return res.status(404).json({ error: 'Photo not found' });
     });
 });
 
