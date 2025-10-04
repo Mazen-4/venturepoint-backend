@@ -1513,7 +1513,12 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
         created_at
     };
     if (req.file) {
-        updateFields.article = req.file.buffer; // Store PDF as BLOB
+        // Store uploaded file buffer and metadata so downloads work correctly
+        updateFields.article = req.file.buffer; // file buffer -> longblob
+        updateFields.article_mimetype = req.file.mimetype || null;
+        updateFields.article_name = req.file.originalname || req.file.filename || `article_${Date.now()}`;
+        // Ensure article_url points to the file endpoint for this article
+        updateFields.article_url = `/api/articles/${req.params.id}/file`;
     }
     pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
