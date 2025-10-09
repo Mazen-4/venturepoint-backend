@@ -1514,18 +1514,48 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
         author_name,
         created_at
     };
-    if (req.file) {
-        // Store uploaded file buffer and metadata so downloads work correctly
-        updateFields.article = req.file.buffer; // file buffer -> longblob
-        updateFields.article_mimetype = req.file.mimetype || null;
-        updateFields.article_name = req.file.originalname || req.file.filename || `article_${Date.now()}`;
-        // Ensure article_url points to the file endpoint for this article
-        updateFields.article_url = `/api/articles/${req.params.id}/file`;
+    try {
+        if (req.file) {
+            // Store uploaded file buffer and metadata so downloads work correctly
+            updateFields.article = req.file.buffer; // file buffer -> longblob
+            updateFields.article_mimetype = req.file.mimetype || null;
+            updateFields.article_name = req.file.originalname || req.file.filename || `article_${Date.now()}`;
+            // Ensure article_url points to the file endpoint for this article
+            updateFields.article_url = `/api/articles/${req.params.id}/file`;
+        }
+
+        // Debug logging for update operation
+        try {
+            console.log(`[EDIT ARTICLE] id=${req.params.id} user=${req.user?.username || req.user?.id || 'unknown'} filePresent=${!!req.file}`);
+            if (req.file) {
+                console.log(`[EDIT ARTICLE] uploaded file: originalname=${req.file.originalname} mimetype=${req.file.mimetype} size=${req.file.size}`);
+            }
+            // Log updateFields keys and whether article is a buffer
+            const fieldSummary = Object.keys(updateFields).reduce((acc, k) => {
+                if (k === 'article' && updateFields.article) {
+                    acc[k] = Buffer.isBuffer(updateFields.article) ? `Buffer(${updateFields.article.length})` : typeof updateFields.article;
+                } else {
+                    acc[k] = updateFields[k] === undefined ? 'undefined' : (updateFields[k] === '' ? "''" : String(updateFields[k]).slice(0, 60));
+                }
+                return acc;
+            }, {});
+            console.log('[EDIT ARTICLE] updateFields summary:', fieldSummary);
+        } catch (logErr) {
+            console.error('Failed to log edit-article debug info:', logErr);
+        }
+
+        pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
+            if (err) {
+                console.error('DB error updating article id=' + req.params.id + ':', err);
+                // Do not dump binary data into logs
+                return res.status(500).json({ success: false, message: 'Database error while updating article', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
+            }
+            res.json({ success: true });
+        });
+    } catch (err) {
+        console.error('Unexpected error in PUT /api/articles/:id', err);
+        return res.status(500).json({ success: false, message: 'Unexpected server error', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
     }
-    pool.query("UPDATE articles SET ? WHERE id = ?", [updateFields, req.params.id], (err, result) => {
-        if (err) return res.status(500).send(err);
-        res.json({ success: true });
-    });
 });
 
 app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
@@ -1549,6 +1579,12 @@ app.get('/api/articles/:id/file', (req, res) => {
         console.log(`[ARTICLE FILE] request for article ${articleId} - hasBlob=${!!hasBlob} mimetype=${r.article_mimetype} url=${r.article_url}`);
         if (hasBlob) {
             const buf = Buffer.isBuffer(r.article) ? r.article : Buffer.from(r.article);
+            // Debug logging for content served
+            try {
+                console.log(`[ARTICLE FILE] serving buffer: isBuffer=${Buffer.isBuffer(r.article)} length=${buf.length}`);
+            } catch (logErr) {
+                console.error('Error logging article buffer info:', logErr);
+            }
             // Set headers for download with original filename if available
             res.setHeader('Content-Type', r.article_mimetype || 'application/pdf');
             if (r.article_name) res.setHeader('Content-Disposition', `attachment; filename="${r.article_name}"`);
