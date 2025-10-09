@@ -75,6 +75,46 @@ pool.getConnection((err, connection) => {
     connection.release();
 });
 
+// Ensure required columns exist in articles table (add blob & metadata columns if missing)
+const ensureArticleColumns = () => {
+    const needed = [
+        { name: 'article', sql: 'LONGBLOB' },
+        { name: 'article_mimetype', sql: 'VARCHAR(255)' },
+        { name: 'article_name', sql: 'VARCHAR(512)' },
+        { name: 'article_url', sql: 'VARCHAR(512)' }
+    ];
+
+    pool.query('SHOW COLUMNS FROM articles', (err, results) => {
+        if (err) {
+            console.error('Failed to check articles table columns:', err.message || err);
+            return;
+        }
+        const existing = new Set(results.map(r => r.Field));
+        const alters = [];
+        needed.forEach(col => {
+            if (!existing.has(col.name)) {
+                alters.push(`ADD COLUMN ${col.name} ${col.sql} DEFAULT NULL`);
+            }
+        });
+        if (alters.length === 0) {
+            console.log('Articles table has required file columns');
+            return;
+        }
+        const q = `ALTER TABLE articles ${alters.join(', ')}`;
+        console.log('Altering articles table to add missing columns:', alters.map(a => a.split(' ')[2]).join(', '));
+        pool.query(q, (aerr) => {
+            if (aerr) {
+                console.error('Failed to add missing columns to articles table:', aerr.message || aerr);
+            } else {
+                console.log('Successfully added missing columns to articles table');
+            }
+        });
+    });
+};
+
+// Run the schema check at startup
+ensureArticleColumns();
+
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
 // For future: Add pagination and filtering to API endpoints for scalability and usability
