@@ -29,6 +29,25 @@ app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
 
+// Serve favicon if requested to avoid noisy 404s (use backend/images/favicon.ico if present,
+// fall back to VPED-logo.png, otherwise return 204 No Content)
+app.get('/favicon.ico', (req, res) => {
+    try {
+        const faviconPath = path.join(__dirname, 'images', 'favicon.ico');
+        if (fs.existsSync(faviconPath)) {
+            return res.sendFile(faviconPath);
+        }
+        const fallback = path.join(__dirname, 'images', 'VPED-logo.png');
+        if (fs.existsSync(fallback)) {
+            res.setHeader('Content-Type', 'image/png');
+            return res.sendFile(fallback);
+        }
+    } catch (err) {
+        console.error('Error serving favicon:', err);
+    }
+    return res.status(204).end();
+});
+
 
 const fileFilter = (req, file, cb) => {
     // Allow images and common document types (pdf, doc, docx, txt)
