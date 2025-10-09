@@ -18,7 +18,9 @@ app.use(cors({
     origin: ['http://localhost:3000', 'https://venturepoint-egypt.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    // Expose these headers so the browser can read them (e.g. Content-Disposition for filenames)
+    exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
 }));
 
 app.use(express.json());
