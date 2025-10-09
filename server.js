@@ -1664,6 +1664,34 @@ app.get('/api/articles/:id/file', (req, res) => {
     });
 });
 
+// Debug endpoint: return metadata and a small head preview of the stored blob
+app.get('/api/articles/:id/file-info', (req, res) => {
+    const articleId = req.params.id;
+    pool.query('SELECT article, article_mimetype, article_name FROM articles WHERE id = ?', [articleId], (err, results) => {
+        if (err) {
+            console.error('Error fetching article file info:', err);
+            return res.status(500).json({ error: 'Failed to load article file info' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Article not found' });
+        const r = results[0];
+        const hasBlob = r.article && r.article.length > 0;
+        if (!hasBlob) return res.json({ hasBlob: false });
+        const buf = Buffer.isBuffer(r.article) ? r.article : Buffer.from(r.article);
+        // Prepare small previews
+        const head = buf.slice(0, 64);
+        const headHex = head.toString('hex');
+        const headBase64 = head.toString('base64');
+        return res.json({
+            hasBlob: true,
+            article_name: r.article_name || null,
+            article_mimetype: r.article_mimetype || null,
+            length: buf.length,
+            head_hex: headHex,
+            head_base64: headBase64
+        });
+    });
+});
+
 // EVENTS CRUD
 app.get("/api/events/:id", (req, res) => {
     pool.query("SELECT * FROM events WHERE id = ?", [req.params.id], (err, results) => {
