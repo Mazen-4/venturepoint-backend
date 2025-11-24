@@ -208,9 +208,11 @@ app.get("/api/partners/:id", (req, res) => {
 // Add a new partner (admin or superadmin, with image upload)
 app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     try {
-        const { name, description, website, ...otherFields } = req.body;
+        const { name, description, details, website, ...otherFields } = req.body;
         if (!name) return res.status(400).json({ error: "Partner name required" });
-        let insertData = { name, description, website, ...otherFields };
+        let insertData = { name, website, ...otherFields };
+        // Handle both 'description' and 'details' field names (frontend uses 'details')
+        insertData.description = description || details || '';
         if (req.file) {
             insertData.image_url = `/images/${req.file.filename}`;
         }
@@ -234,14 +236,16 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 // Update a partner (admin/superadmin, with image upload)
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     const partnerId = req.params.id;
-    const { name, description, website, ...otherFields } = req.body;
+    const { name, description, details, website, ...otherFields } = req.body;
     // Get old image_url if no new image is uploaded
     pool.query('SELECT image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         let updateData = { ...otherFields };
         if (name !== undefined) updateData.name = name;
+        // Handle both 'description' and 'details' field names (frontend uses 'details')
         if (description !== undefined) updateData.description = description;
+        if (details !== undefined) updateData.description = details;
         if (website !== undefined) updateData.website = website;
         if (req.file) {
             updateData.image_url = `/images/${req.file.filename}`;
