@@ -27,7 +27,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-
 // PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
 
 // Serve favicon if requested to avoid noisy 404s (use backend/images/favicon.ico if present,
@@ -358,11 +357,14 @@ app.get('/api/advisors/:id', (req, res) => {
 // POST /api/advisors - Create a new advisor (admin/superadmin, with image upload)
 app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     try {
-        const { name, area_of_focus, bio } = req.body;
+        const { name, area_of_focus, bio, is_top_advisor } = req.body;
         if (!name || !area_of_focus || !bio) {
             return res.status(400).json({ error: 'Name, area_of_focus, and bio are required' });
         }
         let insertData = { name, area_of_focus, bio };
+        if (is_top_advisor !== undefined && is_top_advisor !== null) {
+            insertData.is_top_advisor = is_top_advisor;
+        }
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
             insertData.photo_name = file.originalname || file.filename || null;
@@ -399,7 +401,7 @@ app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmi
 // PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
 app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     const advisorId = req.params.id;
-    const { name, area_of_focus, bio } = req.body;
+    const { name, area_of_focus, bio, is_top_advisor } = req.body;
     pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
@@ -407,6 +409,7 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
         if (name !== undefined) updateData.name = name;
         if (area_of_focus !== undefined) updateData.area_of_focus = area_of_focus;
         if (bio !== undefined) updateData.bio = bio;
+        if (is_top_advisor !== undefined && is_top_advisor !== null) updateData.is_top_advisor = is_top_advisor;
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
             updateData.photo_name = file.originalname || file.filename || null;
@@ -1872,5 +1875,3 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
-
-
