@@ -893,8 +893,122 @@ app.get("/api/about", (req, res) => {
         if (!results || results.length === 0) {
             return res.status(404).json({ error: "No about data found" });
         }
-        console.log("About data fetched:", results[0]);
-        res.json(results[0]);
+        const r = results[0];
+        // Normalize binary/blob fields so frontend doesn't receive raw Buffer JSON
+        const out = { ...r };
+        try {
+            Object.keys(r).forEach(key => {
+                const val = r[key];
+                // Handle mysql2 Buffer instances
+                if (Buffer.isBuffer(val)) {
+                    // Try to decode as UTF-8 text (some apps stored filesystem paths in blob columns)
+                    const text = val.toString('utf8').trim();
+                    // If decoded text looks like a path or url, return it as string
+                    if (text.startsWith('/images/') || text.startsWith('/api/') || text.startsWith('http://') || text.startsWith('https://')) {
+                        out[key] = text;
+                        return;
+                    }
+
+                    // Detect common image signatures (PNG, JPEG, GIF, WebP)
+                    const head = val.slice(0, 12);
+                    const headStr = head.toString('hex');
+                    const isPNG = head.slice(0,4).toString() === '\u0089PNG';
+                    const isJPG = val[0] === 0xFF && val[1] === 0xD8 && val[2] === 0xFF;
+                    const isGIF = head.slice(0,3).toString() === 'GIF';
+                    const isWebP = head.slice(8,12).toString() === 'WEBP';
+                    if (isPNG || isJPG || isGIF || isWebP) {
+                        // replace raw binary with empty value and expose a per-field image endpoint
+                        out[key] = '';
+                        // ensure we have an id to reference
+                        const id = r.id || 1;
+                        out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
+                        return;
+                    }
+
+                    // Fallback: set as decoded text (may be readable)
+                    out[key] = text;
+                    return;
+                }
+
+                // Handle serialized Buffer objects that may have been JSON-encoded
+                if (val && typeof val === 'object' && val.type === 'Buffer' && Array.isArray(val.data)) {
+                    try {
+                        const buf = Buffer.from(val.data);
+                        const text = buf.toString('utf8').trim();
+                        if (text.startsWith('/images/') || text.startsWith('/api/') || text.startsWith('http://') || text.startsWith('https://')) {
+                            out[key] = text;
+                            return;
+                        }
+                        const isJpg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+                        const isPng = buf.slice(0,4).toString() === '\u0089PNG';
+                        if (isJpg || isPng) {
+                            out[key] = '';
+                            const id = r.id || 1;
+                            out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
+                            return;
+                        }
+                        out[key] = text;
+                        return;
+                    } catch (e) {
+                        out[key] = String(val);
+                        return;
+                    }
+                }
+
+                // leave other types as-is
+            });
+        } catch (e) {
+            console.error('Error normalizing about row:', e);
+        }
+
+        console.log("About data fetched (normalized)");
+        res.json(out);
+    });
+});
+
+// Serve per-field about image from DB blob or filesystem path
+app.get('/api/about/:id/image/:field', (req, res) => {
+    const { id, field } = req.params;
+    // Protect against injection by only allowing simple field names
+    if (!/^[a-zA-Z0-9_]+$/.test(field)) return res.status(400).json({ error: 'Invalid field' });
+    // select the requested field and its optional mimetype column (if present)
+    pool.query('SELECT ??, ?? FROM about WHERE id = ?', [field, `${field}_mimetype`, id], (err, results) => {
+        if (err) {
+            console.error('Error fetching about field image:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Not found' });
+        const row = results[0];
+        const value = row[field];
+        const mimetype = row[`${field}_mimetype`] || 'image/jpeg';
+
+        // If value is a Buffer-like object
+        if (Buffer.isBuffer(value)) {
+            res.setHeader('Content-Type', mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', value.length);
+            return res.send(value);
+        }
+
+        // Handle serialized Buffer object
+        if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+            const buf = Buffer.from(value.data);
+            res.setHeader('Content-Type', mimetype || 'image/jpeg');
+            res.setHeader('Content-Length', buf.length);
+            return res.send(buf);
+        }
+
+        // If the column actually holds a filesystem path string (e.g., '/images/...')
+        if (typeof value === 'string' && value.startsWith('/images/')) {
+            const filePath = path.join(__dirname, value);
+            return res.sendFile(filePath, (sendErr) => {
+                if (sendErr) {
+                    console.error('Failed to send about file fallback:', sendErr);
+                    res.status(500).end();
+                }
+            });
+        }
+
+        return res.status(404).json({ error: 'Image not found' });
     });
 });
 
