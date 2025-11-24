@@ -1729,10 +1729,17 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
             if (event_date !== undefined) updateData.event_date = event_date;
             if (req.file) {
                 updateData.image_url = `images/${req.file.filename}`;
+            } else if (req.body && (req.body.remove_image === '1' || req.body.remove_image === 'true' || req.body.remove_image === 'yes')) {
+                // Client requested removal of current image
+                updateData.image_url = '';
+                // If your schema stores blobs, clear them too
+                updateData.image_data = null;
+                updateData.image_mimetype = '';
+                updateData.image_name = '';
             } else {
-                // Remove any leading slash for consistency
+                // Keep existing image_url (remove any leading slash for consistency)
                 let oldUrl = results[0]?.image_url || '';
-                if (oldUrl.startsWith('/')) oldUrl = oldUrl.substring(1);
+                if (oldUrl && oldUrl.startsWith('/')) oldUrl = oldUrl.substring(1);
                 updateData.image_url = oldUrl;
             }
             const fields = Object.keys(updateData);
