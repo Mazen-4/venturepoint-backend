@@ -894,6 +894,74 @@ app.get("/api/about", (req, res) => {
     });
 });
 
+// Update about page data (admin/superadmin)
+app.put("/api/about", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    pool.query("SELECT id FROM about LIMIT 1", (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (!results || results.length === 0) {
+            // If no row exists, create one
+            const insertData = { ...req.body };
+            const fields = Object.keys(insertData);
+            const values = Object.values(insertData);
+            const placeholders = fields.map(() => '?').join(', ');
+            pool.query(`INSERT INTO about (${fields.join(', ')}) VALUES (${placeholders})`, values, (insertErr, insertResult) => {
+                if (insertErr) {
+                    return res.status(500).json({ error: insertErr.message });
+                }
+                res.json({ success: true, message: "About data created successfully" });
+            });
+        } else {
+            // Update existing row
+            const aboutId = results[0].id;
+            let updateData = {};
+            
+            // Handle all fields from request body
+            Object.keys(req.body).forEach(key => {
+                if (req.body[key] !== undefined && req.body[key] !== null) {
+                    updateData[key] = req.body[key];
+                }
+            });
+            
+            // Handle file uploads (for image columns)
+            if (req.files && req.files.length > 0) {
+                req.files.forEach(file => {
+                    if (file.fieldname && file.buffer) {
+                        // Store image in database or as file path
+                        updateData[file.fieldname] = `/images/about_${file.fieldname}_${Date.now()}${require('path').extname(file.originalname)}`;
+                        // Save file to disk
+                        const fs = require('fs');
+                        const path = require('path');
+                        const uploadsDir = path.join(__dirname, 'images');
+                        if (!fs.existsSync(uploadsDir)) {
+                            fs.mkdirSync(uploadsDir, { recursive: true });
+                        }
+                        fs.writeFileSync(path.join(uploadsDir, path.basename(updateData[file.fieldname])), file.buffer);
+                    }
+                });
+            }
+            
+            const fields = Object.keys(updateData);
+            if (fields.length === 0) {
+                return res.json({ success: true, message: "No changes to update" });
+            }
+            
+            const values = fields.map(f => updateData[f]);
+            const setClause = fields.map(f => `${f} = ?`).join(', ');
+            const query = `UPDATE about SET ${setClause} WHERE id = ?`;
+            values.push(aboutId);
+            
+            pool.query(query, values, (err, result) => {
+                if (err) {
+                    return res.status(500).json({ error: err.message });
+                }
+                res.json({ success: true, message: "About data updated successfully" });
+            });
+        }
+    });
+});
+
 //    <Route path="/services" element={<ServicesPage />} />
 
 
