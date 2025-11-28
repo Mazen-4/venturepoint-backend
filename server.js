@@ -1748,11 +1748,44 @@ app.get("/api/articles/:id", (req, res) => {
     });
 });
 
-app.post("/api/articles", authenticateToken, (req, res) => {
-    pool.query("INSERT INTO articles SET ?", req.body, (err, result) => {
-        if (err) return res.status(500).send(err);
-        res.json({ success: true, id: result.insertId });
-    });
+app.post("/api/articles", authenticateToken, upload.single('article_pdf'), (req, res) => {
+    try {
+        const { title, content, author_name, created_at } = req.body;
+        const insertData = {
+            title,
+            content,
+            author_name,
+            created_at
+        };
+
+        if (req.file) {
+            insertData.article = req.file.buffer || null;
+            insertData.article_mimetype = req.file.mimetype || null;
+            insertData.article_name = req.file.originalname || req.file.filename || `article_${Date.now()}`;
+            // article_url will be set after insert to point to file endpoint
+        } else {
+            insertData.article_url = '';
+        }
+
+        pool.query("INSERT INTO articles SET ?", insertData, (err, result) => {
+            if (err) {
+                console.error('Create article DB error:', err);
+                return res.status(500).json({ success: false, message: 'Failed to create article', error: err.message });
+            }
+            const newId = result.insertId;
+            if (req.file) {
+                pool.query('UPDATE articles SET article_url = ? WHERE id = ?', [`/api/articles/${newId}/file`, newId], (uerr) => {
+                    if (uerr) console.error('Failed to set article_url after insert:', uerr);
+                    return res.status(201).json({ success: true, id: newId });
+                });
+            } else {
+                return res.status(201).json({ success: true, id: newId });
+            }
+        });
+    } catch (error) {
+        console.error('Create article error:', error);
+        res.status(500).json({ success: false, message: 'Failed to create article', error: error.message });
+    }
 });
 
 app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
