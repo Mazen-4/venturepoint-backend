@@ -341,7 +341,8 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
     const partnerId = req.params.id;
     const { name, description, details, website, ...otherFields } = req.body;
     // Get old image data if no new image is uploaded
-        pool.query('SELECT image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
+        // Include the legacy `image` column so existing images stored in that column are preserved
+        pool.query('SELECT image_data, image_mimetype, image, image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
             console.error('Error fetching partner for update:', err);
             return res.status(500).json({ error: err.message });
         }
@@ -357,10 +358,12 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
         if (website !== undefined) updateData.website = website;
         
         if (req.file) {
-            // New image uploaded
+            // New image uploaded -> write into the new blob column and clear legacy column
             updateData.image_data = req.file.buffer || null;
             updateData.image_mimetype = req.file.mimetype || null;
-            updateData.image = null; // Clear legacy column
+            updateData.image = null; // Clear legacy column so we don't have duplicate storage
+            // Ensure image_url points to the serving endpoint so frontend can load the new image
+            updateData.image_url = `/api/partners/${partnerId}/image`;
         } else {
             // No new image - preserve existing image from either image_data or image column
             const hasImageData = existing.image_data && existing.image_data.length > 0;
@@ -370,12 +373,19 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                 updateData.image_data = existing.image_data;
                 updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
             } else if (hasImage) {
+                // copy legacy `image` into `image_data` so the rest of the app uses a single column
                 updateData.image_data = existing.image;
                 updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
+                // preserve image_url if present
+                if (existing.image_url) updateData.image_url = existing.image_url;
             }
         }
         
         const fields = Object.keys(updateData);
+        if (fields.length === 0) {
+            // Nothing to update
+            return res.status(400).json({ error: 'No update fields provided' });
+        }
         const values = fields.map(f => updateData[f]);
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
