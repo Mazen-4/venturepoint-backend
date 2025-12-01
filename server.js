@@ -993,30 +993,36 @@ app.get('/api/about/:id/image/:field', (req, res) => {
         return res.status(400).json({ error: 'Invalid field' });
     }
     
-    console.log(`Fetching image for about id=${id}, field=${field}`);
+    console.log(`[IMAGE-FETCH] Fetching image for about id=${id}, field=${field}`);
     
     // Use raw query with proper field name escaping
     const query = `SELECT \`${field}\`, \`${field}_mimetype\` FROM about WHERE id = ?`;
     pool.query(query, [id], (err, results) => {
         if (err) {
-            console.error('Error fetching about field image:', err);
+            console.error('[IMAGE-FETCH] Database error:', err);
             return res.status(500).json({ error: 'Failed to load image', details: err.message });
         }
         
         if (!results || results.length === 0) {
-            console.warn(`No results found for about id=${id}`);
+            console.warn(`[IMAGE-FETCH] No record found for about id=${id}`);
             return res.status(404).json({ error: 'Not found' });
         }
         
         const row = results[0];
         const value = row[field];
-        const mimetype = row[`${field}_mimetype`] || 'image/jpeg';
+        const mimetype = row[`${field}_mimetype`];
         
-        console.log(`Field ${field}: value type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}, value length=${value ? (Buffer.isBuffer(value) ? value.length : String(value).length) : 'null'}`);
+        console.log(`[IMAGE-FETCH] Field ${field}: type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}, mimetype=${mimetype}, ${value ? (Buffer.isBuffer(value) ? `size=${value.length}` : `length=${String(value).length}`) : 'NULL'}`);
+
+        // If value is NULL or undefined
+        if (!value) {
+            console.warn(`[IMAGE-FETCH] Field ${field} is empty/null in database`);
+            return res.status(404).json({ error: 'No image data', details: `${field} column is empty` });
+        }
 
         // If value is a Buffer-like object (binary image data)
         if (Buffer.isBuffer(value)) {
-            console.log(`Sending buffer image, size=${value.length}, mimetype=${mimetype}`);
+            console.log(`[IMAGE-FETCH] ✅ Sending buffer image, size=${value.length}, mimetype=${mimetype || 'image/jpeg'}`);
             res.setHeader('Content-Type', mimetype || 'image/jpeg');
             res.setHeader('Content-Length', value.length);
             res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -1026,7 +1032,7 @@ app.get('/api/about/:id/image/:field', (req, res) => {
         // Handle serialized Buffer object (shouldn't happen with direct storage, but just in case)
         if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
             const buf = Buffer.from(value.data);
-            console.log(`Sending serialized buffer image, size=${buf.length}, mimetype=${mimetype}`);
+            console.log(`[IMAGE-FETCH] ✅ Sending serialized buffer image, size=${buf.length}, mimetype=${mimetype || 'image/jpeg'}`);
             res.setHeader('Content-Type', mimetype || 'image/jpeg');
             res.setHeader('Content-Length', buf.length);
             res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -1034,19 +1040,25 @@ app.get('/api/about/:id/image/:field', (req, res) => {
         }
 
         // If the column actually holds a filesystem path string (legacy fallback)
-        if (typeof value === 'string' && value.startsWith('/images/')) {
-            console.log(`Fallback: serving image from filesystem path: ${value}`);
-            const filePath = path.join(__dirname, value);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send about file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
+        if (typeof value === 'string' && value.length > 0) {
+            if (value.startsWith('/images/')) {
+                console.log(`[IMAGE-FETCH] Fallback: serving image from filesystem path: ${value}`);
+                const filePath = path.join(__dirname, value);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('[IMAGE-FETCH] Failed to send file fallback:', sendErr.message);
+                        res.status(404).json({ error: 'File not found', file: value });
+                    }
+                });
+            } else {
+                // It's a string but not a file path - likely corrupted data
+                console.warn(`[IMAGE-FETCH] Field ${field} contains string data (not image): ${value.substring(0, 50)}`);
+                return res.status(404).json({ error: 'Invalid data', details: `${field} contains text, not image data` });
+            }
         }
 
-        console.warn(`No valid image data found for ${field} (value type: ${typeof value}, value: ${value})`);
-        return res.status(404).json({ error: 'Image not found', details: `No binary data in ${field} column` });
+        console.warn(`[IMAGE-FETCH] Unexpected data type for ${field}: ${typeof value}`);
+        return res.status(404).json({ error: 'Image not found', details: `Unexpected data type: ${typeof value}` });
     });
 });
 
@@ -1082,8 +1094,10 @@ app.put("/api/about", authenticateToken, requireAnyRole(["admin", "superadmin"])
             
             // Handle file uploads (for image columns)
             if (req.files && req.files.length > 0) {
+                console.log(`[UPLOAD] Processing ${req.files.length} file(s)`);
                 req.files.forEach(file => {
                     if (file.fieldname && file.buffer) {
+                        console.log(`[UPLOAD] File: fieldname=${file.fieldname}, originalname=${file.originalname}, mimetype=${file.mimetype}, size=${file.buffer.length}`);
                         // Store image binary data directly in database BLOB column
                         updateData[file.fieldname] = file.buffer;
                         // Also store mimetype if a mimetype column exists
@@ -1099,6 +1113,8 @@ app.put("/api/about", authenticateToken, requireAnyRole(["admin", "superadmin"])
                 return res.json({ success: true, message: "No changes to update" });
             }
             
+            console.log(`[UPLOAD] Updating ${fields.length} fields:`, fields.filter(f => f.includes('approach') || f.includes('offer')));
+            
             const values = fields.map(f => updateData[f]);
             const setClause = fields.map(f => `${f} = ?`).join(', ');
             const query = `UPDATE about SET ${setClause} WHERE id = ?`;
@@ -1106,8 +1122,10 @@ app.put("/api/about", authenticateToken, requireAnyRole(["admin", "superadmin"])
             
             pool.query(query, values, (err, result) => {
                 if (err) {
+                    console.error('[UPLOAD] Update failed:', err);
                     return res.status(500).json({ error: err.message });
                 }
+                console.log('[UPLOAD] ✅ Update successful, rows affected:', result.affectedRows);
                 res.json({ success: true, message: "About data updated successfully" });
             });
         }
