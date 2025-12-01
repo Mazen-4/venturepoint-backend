@@ -329,7 +329,7 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 // Update a partner (admin/superadmin, with image upload)
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     const partnerId = req.params.id;
-    const { name, description, details, website, ...otherFields } = req.body;
+    const { name, description, details, website } = req.body;
     console.log(`[PARTNER UPDATE] Request to update partner ${partnerId}`);
     console.log('[PARTNER UPDATE] req.body keys:', Object.keys(req.body));
     console.log('[PARTNER UPDATE] req.body sample:', {
@@ -350,7 +350,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         
         const existing = results[0];
-        let updateData = { ...otherFields };
+        let updateData = {};
         
         if (name !== undefined) updateData.name = name;
         // Handle both 'description' and 'details' field names (frontend uses 'details')
