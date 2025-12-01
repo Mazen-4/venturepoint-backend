@@ -373,6 +373,8 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                 updateData.image_data = existing.image;
                 updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
             }
+            // IMPORTANT: Always preserve the legacy image column to maintain backward compatibility
+            updateData.image = existing.image;
         }
         
         const fields = Object.keys(updateData);
