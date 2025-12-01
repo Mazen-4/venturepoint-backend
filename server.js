@@ -901,6 +901,11 @@ app.get("/api/about", (req, res) => {
             Object.keys(out).forEach(key => {
                 const val = out[key];
                 
+                // Log all fields for debugging
+                if (key === 'our_approach' || key === 'what_we_offer') {
+                    console.log(`Processing ${key}: type=${typeof val}, isBuffer=${Buffer.isBuffer(val)}, length=${val ? (Buffer.isBuffer(val) ? val.length : String(val).length) : 'null'}`);
+                }
+                
                 // Handle mysql2 Buffer instances
                 if (Buffer.isBuffer(val)) {
                     // Check for image signatures first (PNG, JPEG, GIF, WebP)
@@ -922,7 +927,7 @@ app.get("/api/about", (req, res) => {
                         // Binary image data - replace with empty and provide URL
                         out[key] = '';
                         out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
-                        console.log(`Detected binary image in ${key} column`);
+                        console.log(`✅ Detected binary image in ${key} column, size=${val.length}`);
                         return;
                     }
                     
@@ -983,35 +988,54 @@ app.get("/api/about", (req, res) => {
 app.get('/api/about/:id/image/:field', (req, res) => {
     const { id, field } = req.params;
     // Protect against injection by only allowing simple field names
-    if (!/^[a-zA-Z0-9_]+$/.test(field)) return res.status(400).json({ error: 'Invalid field' });
-    // select the requested field and its optional mimetype column (if present)
-    pool.query('SELECT ??, ?? FROM about WHERE id = ?', [field, `${field}_mimetype`, id], (err, results) => {
+    if (!/^[a-zA-Z0-9_]+$/.test(field)) {
+        console.error('Invalid field name:', field);
+        return res.status(400).json({ error: 'Invalid field' });
+    }
+    
+    console.log(`Fetching image for about id=${id}, field=${field}`);
+    
+    // Use raw query with proper field name escaping
+    const query = `SELECT \`${field}\`, \`${field}_mimetype\` FROM about WHERE id = ?`;
+    pool.query(query, [id], (err, results) => {
         if (err) {
             console.error('Error fetching about field image:', err);
-            return res.status(500).json({ error: 'Failed to load image' });
+            return res.status(500).json({ error: 'Failed to load image', details: err.message });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Not found' });
+        
+        if (!results || results.length === 0) {
+            console.warn(`No results found for about id=${id}`);
+            return res.status(404).json({ error: 'Not found' });
+        }
+        
         const row = results[0];
         const value = row[field];
         const mimetype = row[`${field}_mimetype`] || 'image/jpeg';
+        
+        console.log(`Field ${field}: value type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}, value length=${value ? (Buffer.isBuffer(value) ? value.length : String(value).length) : 'null'}`);
 
-        // If value is a Buffer-like object
+        // If value is a Buffer-like object (binary image data)
         if (Buffer.isBuffer(value)) {
+            console.log(`Sending buffer image, size=${value.length}, mimetype=${mimetype}`);
             res.setHeader('Content-Type', mimetype || 'image/jpeg');
             res.setHeader('Content-Length', value.length);
+            res.setHeader('Cache-Control', 'public, max-age=3600');
             return res.send(value);
         }
 
-        // Handle serialized Buffer object
+        // Handle serialized Buffer object (shouldn't happen with direct storage, but just in case)
         if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
             const buf = Buffer.from(value.data);
+            console.log(`Sending serialized buffer image, size=${buf.length}, mimetype=${mimetype}`);
             res.setHeader('Content-Type', mimetype || 'image/jpeg');
             res.setHeader('Content-Length', buf.length);
+            res.setHeader('Cache-Control', 'public, max-age=3600');
             return res.send(buf);
         }
 
-        // If the column actually holds a filesystem path string (e.g., '/images/...')
+        // If the column actually holds a filesystem path string (legacy fallback)
         if (typeof value === 'string' && value.startsWith('/images/')) {
+            console.log(`Fallback: serving image from filesystem path: ${value}`);
             const filePath = path.join(__dirname, value);
             return res.sendFile(filePath, (sendErr) => {
                 if (sendErr) {
@@ -1021,7 +1045,8 @@ app.get('/api/about/:id/image/:field', (req, res) => {
             });
         }
 
-        return res.status(404).json({ error: 'Image not found' });
+        console.warn(`No valid image data found for ${field} (value type: ${typeof value}, value: ${value})`);
+        return res.status(404).json({ error: 'Image not found', details: `No binary data in ${field} column` });
     });
 });
 
