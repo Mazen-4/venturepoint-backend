@@ -901,33 +901,34 @@ app.get("/api/about", (req, res) => {
                 const val = r[key];
                 // Handle mysql2 Buffer instances
                 if (Buffer.isBuffer(val)) {
-                    // Try to decode as UTF-8 text (some apps stored filesystem paths in blob columns)
+                    // Try to decode as UTF-8 text
                     const text = val.toString('utf8').trim();
-                    // If decoded text looks like a path or url, return it as string
-                    if (text.startsWith('/images/') || text.startsWith('/api/') || text.startsWith('http://') || text.startsWith('https://')) {
-                        out[key] = text;
-                        return;
-                    }
-
+                    
                     // Detect common image signatures (PNG, JPEG, GIF, WebP)
                     const head = val.slice(0, 12);
-                    const headStr = head.toString('hex');
                     const isPNG = head.slice(0,4).toString() === '\u0089PNG';
                     const isJPG = val[0] === 0xFF && val[1] === 0xD8 && val[2] === 0xFF;
                     const isGIF = head.slice(0,3).toString() === 'GIF';
                     const isWebP = head.slice(8,12).toString() === 'WEBP';
+                    
                     if (isPNG || isJPG || isGIF || isWebP) {
-                        // replace raw binary with empty value and expose a per-field image endpoint
+                        // Binary image data detected - replace with empty value and expose a per-field image endpoint
                         out[key] = '';
-                        // ensure we have an id to reference
                         const id = r.id || 1;
                         out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
                         return;
                     }
 
-                    // Fallback: set as decoded text (may be readable)
-                    out[key] = text;
+                    // If it looks like a non-image text, return as text (not as file path)
+                    if (!text.startsWith('/') && text.length > 0) {
+                        out[key] = text;
+                        return;
+                    }
+                    
+                    // Ignore file paths stored in BLOB columns - they're legacy
+                    out[key] = '';
                     return;
+
                 }
 
                 // Handle serialized Buffer objects that may have been JSON-encoded
@@ -1046,16 +1047,12 @@ app.put("/api/about", authenticateToken, requireAnyRole(["admin", "superadmin"])
             if (req.files && req.files.length > 0) {
                 req.files.forEach(file => {
                     if (file.fieldname && file.buffer) {
-                        // Store image in database or as file path
-                        updateData[file.fieldname] = `/images/about_${file.fieldname}_${Date.now()}${require('path').extname(file.originalname)}`;
-                        // Save file to disk
-                        const fs = require('fs');
-                        const path = require('path');
-                        const uploadsDir = path.join(__dirname, 'images');
-                        if (!fs.existsSync(uploadsDir)) {
-                            fs.mkdirSync(uploadsDir, { recursive: true });
+                        // Store image binary data directly in database BLOB column
+                        updateData[file.fieldname] = file.buffer;
+                        // Also store mimetype if a mimetype column exists
+                        if (updateData[`${file.fieldname}_mimetype`] === undefined) {
+                            updateData[`${file.fieldname}_mimetype`] = file.mimetype || 'image/jpeg';
                         }
-                        fs.writeFileSync(path.join(uploadsDir, path.basename(updateData[file.fieldname])), file.buffer);
                     }
                 });
             }
