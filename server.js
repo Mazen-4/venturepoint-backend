@@ -996,8 +996,8 @@ app.get('/api/about/:id/image/:field', (req, res) => {
         
         console.log(`[IMAGE-FETCH] Fetching image for about id=${id}, field=${field}`);
         
-        // Use raw query with proper field name escaping
-        const query = `SELECT \`${field}\`, \`${field}_mimetype\` FROM about WHERE id = ?`;
+        // Query only the field column (mimetype column may not exist)
+        const query = `SELECT \`${field}\` FROM about WHERE id = ?`;
         pool.query(query, [id], (err, results) => {
             try {
                 if (err) {
@@ -1012,9 +1012,23 @@ app.get('/api/about/:id/image/:field', (req, res) => {
                 
                 const row = results[0];
                 const value = row[field];
-                const mimetype = row[`${field}_mimetype`];
                 
-                console.log(`[IMAGE-FETCH] Field ${field}: type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}`);
+                // Detect mimetype from binary data
+                let mimetype = 'image/jpeg'; // default
+                if (Buffer.isBuffer(value)) {
+                    const head = value.slice(0, 12);
+                    if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) {
+                        mimetype = 'image/png';
+                    } else if (value[0] === 0xFF && value[1] === 0xD8 && value[2] === 0xFF) {
+                        mimetype = 'image/jpeg';
+                    } else if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) {
+                        mimetype = 'image/gif';
+                    } else if (value.length >= 12 && value.slice(8, 12).toString('ascii') === 'WEBP') {
+                        mimetype = 'image/webp';
+                    }
+                }
+                
+                console.log(`[IMAGE-FETCH] Field ${field}: type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}, detected mimetype=${mimetype}`);
 
                 // If value is NULL or undefined
                 if (!value) {
@@ -1024,8 +1038,8 @@ app.get('/api/about/:id/image/:field', (req, res) => {
 
                 // If value is a Buffer-like object (binary image data)
                 if (Buffer.isBuffer(value)) {
-                    console.log(`[IMAGE-FETCH] ✅ Sending buffer, size=${value.length}`);
-                    res.setHeader('Content-Type', mimetype || 'image/jpeg');
+                    console.log(`[IMAGE-FETCH] ✅ Sending buffer, size=${value.length}, mimetype=${mimetype}`);
+                    res.setHeader('Content-Type', mimetype);
                     res.setHeader('Content-Length', value.length);
                     res.setHeader('Cache-Control', 'public, max-age=3600');
                     return res.send(value);
@@ -1035,8 +1049,8 @@ app.get('/api/about/:id/image/:field', (req, res) => {
                 if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
                     try {
                         const buf = Buffer.from(value.data);
-                        console.log(`[IMAGE-FETCH] ✅ Sending serialized buffer, size=${buf.length}`);
-                        res.setHeader('Content-Type', mimetype || 'image/jpeg');
+                        console.log(`[IMAGE-FETCH] ✅ Sending serialized buffer, size=${buf.length}, mimetype=${mimetype}`);
+                        res.setHeader('Content-Type', mimetype);
                         res.setHeader('Content-Length', buf.length);
                         res.setHeader('Cache-Control', 'public, max-age=3600');
                         return res.send(buf);
