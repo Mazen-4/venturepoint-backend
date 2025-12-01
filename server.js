@@ -986,80 +986,89 @@ app.get("/api/about", (req, res) => {
 
 // Serve per-field about image from DB blob or filesystem path
 app.get('/api/about/:id/image/:field', (req, res) => {
-    const { id, field } = req.params;
-    // Protect against injection by only allowing simple field names
-    if (!/^[a-zA-Z0-9_]+$/.test(field)) {
-        console.error('Invalid field name:', field);
-        return res.status(400).json({ error: 'Invalid field' });
-    }
-    
-    console.log(`[IMAGE-FETCH] Fetching image for about id=${id}, field=${field}`);
-    
-    // Use raw query with proper field name escaping
-    const query = `SELECT \`${field}\`, \`${field}_mimetype\` FROM about WHERE id = ?`;
-    pool.query(query, [id], (err, results) => {
-        if (err) {
-            console.error('[IMAGE-FETCH] Database error:', err);
-            return res.status(500).json({ error: 'Failed to load image', details: err.message });
+    try {
+        const { id, field } = req.params;
+        // Protect against injection by only allowing simple field names
+        if (!/^[a-zA-Z0-9_]+$/.test(field)) {
+            console.error('[IMAGE-FETCH] Invalid field name:', field);
+            return res.status(400).json({ error: 'Invalid field' });
         }
         
-        if (!results || results.length === 0) {
-            console.warn(`[IMAGE-FETCH] No record found for about id=${id}`);
-            return res.status(404).json({ error: 'Not found' });
-        }
+        console.log(`[IMAGE-FETCH] Fetching image for about id=${id}, field=${field}`);
         
-        const row = results[0];
-        const value = row[field];
-        const mimetype = row[`${field}_mimetype`];
-        
-        console.log(`[IMAGE-FETCH] Field ${field}: type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}, mimetype=${mimetype}, ${value ? (Buffer.isBuffer(value) ? `size=${value.length}` : `length=${String(value).length}`) : 'NULL'}`);
+        // Use raw query with proper field name escaping
+        const query = `SELECT \`${field}\`, \`${field}_mimetype\` FROM about WHERE id = ?`;
+        pool.query(query, [id], (err, results) => {
+            try {
+                if (err) {
+                    console.error('[IMAGE-FETCH] Database error:', err.message);
+                    return res.status(500).json({ error: 'Failed to load image', details: err.message });
+                }
+                
+                if (!results || results.length === 0) {
+                    console.warn(`[IMAGE-FETCH] No record found for about id=${id}`);
+                    return res.status(404).json({ error: 'Not found' });
+                }
+                
+                const row = results[0];
+                const value = row[field];
+                const mimetype = row[`${field}_mimetype`];
+                
+                console.log(`[IMAGE-FETCH] Field ${field}: type=${typeof value}, isBuffer=${Buffer.isBuffer(value)}`);
 
-        // If value is NULL or undefined
-        if (!value) {
-            console.warn(`[IMAGE-FETCH] Field ${field} is empty/null in database`);
-            return res.status(404).json({ error: 'No image data', details: `${field} column is empty` });
-        }
+                // If value is NULL or undefined
+                if (!value) {
+                    console.warn(`[IMAGE-FETCH] Field ${field} is empty/null`);
+                    return res.status(404).json({ error: 'No image data' });
+                }
 
-        // If value is a Buffer-like object (binary image data)
-        if (Buffer.isBuffer(value)) {
-            console.log(`[IMAGE-FETCH] ✅ Sending buffer image, size=${value.length}, mimetype=${mimetype || 'image/jpeg'}`);
-            res.setHeader('Content-Type', mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', value.length);
-            res.setHeader('Cache-Control', 'public, max-age=3600');
-            return res.send(value);
-        }
+                // If value is a Buffer-like object (binary image data)
+                if (Buffer.isBuffer(value)) {
+                    console.log(`[IMAGE-FETCH] ✅ Sending buffer, size=${value.length}`);
+                    res.setHeader('Content-Type', mimetype || 'image/jpeg');
+                    res.setHeader('Content-Length', value.length);
+                    res.setHeader('Cache-Control', 'public, max-age=3600');
+                    return res.send(value);
+                }
 
-        // Handle serialized Buffer object (shouldn't happen with direct storage, but just in case)
-        if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
-            const buf = Buffer.from(value.data);
-            console.log(`[IMAGE-FETCH] ✅ Sending serialized buffer image, size=${buf.length}, mimetype=${mimetype || 'image/jpeg'}`);
-            res.setHeader('Content-Type', mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            res.setHeader('Cache-Control', 'public, max-age=3600');
-            return res.send(buf);
-        }
-
-        // If the column actually holds a filesystem path string (legacy fallback)
-        if (typeof value === 'string' && value.length > 0) {
-            if (value.startsWith('/images/')) {
-                console.log(`[IMAGE-FETCH] Fallback: serving image from filesystem path: ${value}`);
-                const filePath = path.join(__dirname, value);
-                return res.sendFile(filePath, (sendErr) => {
-                    if (sendErr) {
-                        console.error('[IMAGE-FETCH] Failed to send file fallback:', sendErr.message);
-                        res.status(404).json({ error: 'File not found', file: value });
+                // Handle serialized Buffer object
+                if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+                    try {
+                        const buf = Buffer.from(value.data);
+                        console.log(`[IMAGE-FETCH] ✅ Sending serialized buffer, size=${buf.length}`);
+                        res.setHeader('Content-Type', mimetype || 'image/jpeg');
+                        res.setHeader('Content-Length', buf.length);
+                        res.setHeader('Cache-Control', 'public, max-age=3600');
+                        return res.send(buf);
+                    } catch (e) {
+                        console.error('[IMAGE-FETCH] Error processing serialized buffer:', e.message);
+                        return res.status(500).json({ error: 'Invalid buffer data' });
                     }
-                });
-            } else {
-                // It's a string but not a file path - likely corrupted data
-                console.warn(`[IMAGE-FETCH] Field ${field} contains string data (not image): ${value.substring(0, 50)}`);
-                return res.status(404).json({ error: 'Invalid data', details: `${field} contains text, not image data` });
-            }
-        }
+                }
 
-        console.warn(`[IMAGE-FETCH] Unexpected data type for ${field}: ${typeof value}`);
-        return res.status(404).json({ error: 'Image not found', details: `Unexpected data type: ${typeof value}` });
-    });
+                // If it's a string (legacy filesystem path)
+                if (typeof value === 'string' && value.length > 0 && value.startsWith('/images/')) {
+                    console.log(`[IMAGE-FETCH] Fallback: serving from filesystem: ${value}`);
+                    const filePath = path.join(__dirname, value);
+                    return res.sendFile(filePath, (sendErr) => {
+                        if (sendErr) {
+                            console.error('[IMAGE-FETCH] File not found:', value);
+                            return res.status(404).json({ error: 'File not found' });
+                        }
+                    });
+                }
+
+                console.warn(`[IMAGE-FETCH] Unexpected data type: ${typeof value}`);
+                return res.status(404).json({ error: 'Image not found' });
+            } catch (innerErr) {
+                console.error('[IMAGE-FETCH] Inner error:', innerErr.message);
+                return res.status(500).json({ error: 'Internal error' });
+            }
+        });
+    } catch (outerErr) {
+        console.error('[IMAGE-FETCH] Outer error:', outerErr.message);
+        return res.status(500).json({ error: 'Internal error' });
+    }
 });
 
 // Update about page data (admin/superadmin)
