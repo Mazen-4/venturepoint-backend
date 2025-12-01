@@ -245,10 +245,8 @@ app.get("/api/partners", (req, res) => {
                 }
             }
             
-            // Add image endpoint URL for serving
-            if (hasImageData || hasImage) {
-                out.image_url = `/api/partners/${r.id}/image`;
-            }
+            // Indicate whether an image is available; frontend uses the image endpoint directly
+            out.has_image = !!(hasImageData || hasImage);
             
             return out;
         });
@@ -277,10 +275,8 @@ app.get("/api/partners/:id", (req, res) => {
             }
         }
         
-        // Add image endpoint URL
-        if (hasImageData || hasImage) {
-            partner.image_url = `/api/partners/${partner.id}/image`;
-        }
+        // Indicate whether an image is available for this partner
+        partner.has_image = !!(hasImageData || hasImage);
         
         // Log what we have
         console.log(`[PARTNER] Fetching partner ${req.params.id}:`, {
@@ -290,7 +286,7 @@ app.get("/api/partners/:id", (req, res) => {
             image_data_type: typeof partner.image_data,
             image_data_length: partner.image_data ? partner.image_data.length : 0,
             image_mimetype: partner.image_mimetype,
-            image_url: partner.image_url
+            has_image: partner.has_image
         });
         
         res.json({ data: partner });
@@ -321,15 +317,9 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
                 return res.status(500).send(err);
             }
             const partnerId = result.insertId;
-            // If image was uploaded, update the image_url to point to the image endpoint
-            if (req.file) {
-                pool.query('UPDATE partners SET image_url = ? WHERE id = ?', [`/api/partners/${partnerId}/image`, partnerId], (err2) => {
-                    if (err2) console.error('Error updating image_url:', err2);
-                    res.status(201).json({ success: true, id: partnerId, partner: { id: partnerId, ...insertData, image_url: `/api/partners/${partnerId}/image` } });
-                });
-            } else {
-                res.status(201).json({ success: true, id: partnerId, partner: { id: partnerId, ...insertData } });
-            }
+            // Respond with created partner metadata; indicate has_image if a file was uploaded
+            const responsePartner = { id: partnerId, ...insertData, has_image: !!req.file };
+            res.status(201).json({ success: true, id: partnerId, partner: responsePartner });
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -352,7 +342,8 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
 
     // Get old image data if no new image is uploaded
         // Include the legacy `image` column so existing images stored in that column are preserved
-        pool.query('SELECT image_data, image_mimetype, image, image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
+        // NOTE: some databases may not have an `image_url` column; do NOT select it here to avoid ER_BAD_FIELD_ERROR
+        pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
             console.error('Error fetching partner for update:', err);
             return res.status(500).json({ error: err.message });
         }
@@ -372,8 +363,6 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
             updateData.image_data = req.file.buffer || null;
             updateData.image_mimetype = req.file.mimetype || null;
             updateData.image = null; // Clear legacy column so we don't have duplicate storage
-            // Ensure image_url points to the serving endpoint so frontend can load the new image
-            updateData.image_url = `/api/partners/${partnerId}/image`;
         } else {
             // No new image - preserve existing image from either image_data or image column
             const hasImageData = existing.image_data && existing.image_data.length > 0;
@@ -386,21 +375,17 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                 // copy legacy `image` into `image_data` so the rest of the app uses a single column
                 updateData.image_data = existing.image;
                 updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
-                // preserve image_url if present
-                if (existing.image_url) updateData.image_url = existing.image_url;
             }
         }
-        
         const fields = Object.keys(updateData);
         if (fields.length === 0) {
-            // Nothing to update
             return res.status(400).json({ error: 'No update fields provided' });
         }
         const values = fields.map(f => updateData[f]);
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
         values.push(partnerId);
-        
+
         console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, fields);
         console.log('[PARTNER UPDATE] Generated query:', query);
         try {
@@ -412,7 +397,6 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
         pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Error updating partner:', err);
-                // Return stack during development to aid debugging
                 return res.status(500).json({ error: err.message, stack: err.stack });
             }
             res.json({ success: true, message: 'Partner updated successfully' });
