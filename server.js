@@ -228,7 +228,33 @@ app.get('/image/:id', (req, res) => {
 app.get("/api/partners", (req, res) => {
     pool.query("SELECT * FROM partners", (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json({ data: results });
+        
+        // Map partners to include image data for frontend preloading
+        const mapped = results.map(r => {
+            const out = { ...r };
+            const hasImageData = r.image_data && r.image_data.length > 0;
+            const hasImage = r.image && r.image.length > 0;
+            
+            // If image_data exists (newer uploads), keep it
+            // If image exists (legacy column), move it to image_data for consistent handling
+            if (!hasImageData && hasImage) {
+                out.image_data = r.image;
+                // Try to infer mimetype if not stored
+                if (!out.image_mimetype) {
+                    out.image_mimetype = 'image/jpeg'; // default fallback
+                }
+            }
+            
+            // Add image endpoint URL for serving
+            if (hasImageData || hasImage) {
+                out.image_url = `/api/partners/${r.id}/image`;
+            }
+            
+            return out;
+        });
+        
+        console.log(`[PARTNERS] Returning ${mapped.length} partners`);
+        res.json({ data: mapped });
     });
 });
 
@@ -237,7 +263,37 @@ app.get("/api/partners/:id", (req, res) => {
     pool.query("SELECT * FROM partners WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
-        res.json({ data: results[0] });
+        
+        const partner = results[0];
+        const hasImageData = partner.image_data && partner.image_data.length > 0;
+        const hasImage = partner.image && partner.image.length > 0;
+        
+        // If image_data doesn't exist but image does (legacy), copy it over
+        if (!hasImageData && hasImage) {
+            partner.image_data = partner.image;
+            // Try to infer mimetype if not stored
+            if (!partner.image_mimetype) {
+                partner.image_mimetype = 'image/jpeg'; // default fallback
+            }
+        }
+        
+        // Add image endpoint URL
+        if (hasImageData || hasImage) {
+            partner.image_url = `/api/partners/${partner.id}/image`;
+        }
+        
+        // Log what we have
+        console.log(`[PARTNER] Fetching partner ${req.params.id}:`, {
+            id: partner.id,
+            name: partner.name,
+            has_image_data: !!(partner.image_data && partner.image_data.length > 0),
+            image_data_type: typeof partner.image_data,
+            image_data_length: partner.image_data ? partner.image_data.length : 0,
+            image_mimetype: partner.image_mimetype,
+            image_url: partner.image_url
+        });
+        
+        res.json({ data: partner });
     });
 });
 
@@ -285,50 +341,93 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
     const partnerId = req.params.id;
     const { name, description, details, website, ...otherFields } = req.body;
     // Get old image data if no new image is uploaded
-    pool.query('SELECT image_url, image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+    pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
+        if (err) {
+            console.error('Error fetching partner for update:', err);
+            return res.status(500).json({ error: err.message });
+        }
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
+        
+        const existing = results[0];
         let updateData = { ...otherFields };
+        
         if (name !== undefined) updateData.name = name;
         // Handle both 'description' and 'details' field names (frontend uses 'details')
         if (description !== undefined) updateData.description = description;
         if (details !== undefined) updateData.description = details;
         if (website !== undefined) updateData.website = website;
+        
         if (req.file) {
+            // New image uploaded
             updateData.image_data = req.file.buffer || null;
             updateData.image_mimetype = req.file.mimetype || null;
-            updateData.image_url = `/api/partners/${partnerId}/image`;
         } else {
-            updateData.image_url = results[0]?.image_url || '';
-            updateData.image_data = results[0]?.image_data || null;
-            updateData.image_mimetype = results[0]?.image_mimetype || null;
+            // No new image - preserve existing image from either image_data or image column
+            const hasImageData = existing.image_data && existing.image_data.length > 0;
+            const hasImage = existing.image && existing.image.length > 0;
+            
+            if (hasImageData) {
+                updateData.image_data = existing.image_data;
+                updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
+            } else if (hasImage) {
+                updateData.image_data = existing.image;
+                updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
+            }
         }
+        
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
         values.push(partnerId);
+        
+        console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, fields);
+        
         pool.query(query, values, (err, result) => {
-            if (err) return res.status(500).json({ error: err.message });
+            if (err) {
+                console.error('Error updating partner:', err);
+                return res.status(500).json({ error: err.message });
+            }
             res.json({ success: true, message: 'Partner updated successfully' });
         });
     });
 });
 
-// Serve partner image from DB blob
+// Serve partner image from DB blob (from either image_data or image column)
 app.get('/api/partners/:id/image', (req, res) => {
     const partnerId = req.params.id;
-    pool.query('SELECT image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
+    pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
         if (err) {
             console.error('Error fetching partner image:', err);
             return res.status(500).json({ error: 'Failed to load image' });
         }
         if (!results || results.length === 0) return res.status(404).json({ error: 'Partner not found' });
+        
         const r = results[0];
-        if (!r.image_data) return res.status(404).json({ error: 'No image found' });
+        let imageData = null;
+        
+        // Try image_data first (newer), fall back to image (legacy)
+        if (r.image_data && r.image_data.length > 0) {
+            imageData = r.image_data;
+        } else if (r.image && r.image.length > 0) {
+            imageData = r.image;
+        }
+        
+        if (!imageData) {
+            console.log(`[PARTNER IMAGE] No image found for partner ${partnerId}`);
+            return res.status(404).json({ error: 'No image found' });
+        }
+        
+        // Ensure we're working with a proper buffer
+        const buf = Buffer.isBuffer(imageData) ? imageData : Buffer.from(imageData);
         const mime = r.image_mimetype || 'image/jpeg';
+        
+        console.log(`[PARTNER IMAGE] Serving image for partner ${partnerId}, size: ${buf.length}, mimetype: ${mime}`);
+        
         res.setHeader('Content-Type', mime);
-        res.send(r.image_data);
+        res.setHeader('Content-Length', buf.length);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.send(buf);
     });
 });
 
