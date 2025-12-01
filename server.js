@@ -308,7 +308,7 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
         if (req.file) {
             insertData.image_data = req.file.buffer || null;
             insertData.image_mimetype = req.file.mimetype || null;
-            insertData.image_url = null; // Will be set to /api/partners/:id/image after insert
+            insertData.image = null; // Clear legacy column
         }
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
@@ -341,8 +341,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
     const partnerId = req.params.id;
     const { name, description, details, website, ...otherFields } = req.body;
     // Get old image data if no new image is uploaded
-    pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
-        if (err) {
+        pool.query('SELECT image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
             console.error('Error fetching partner for update:', err);
             return res.status(500).json({ error: err.message });
         }
@@ -361,6 +360,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
             // New image uploaded
             updateData.image_data = req.file.buffer || null;
             updateData.image_mimetype = req.file.mimetype || null;
+            updateData.image = null; // Clear legacy column
         } else {
             // No new image - preserve existing image from either image_data or image column
             const hasImageData = existing.image_data && existing.image_data.length > 0;
@@ -373,8 +373,6 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                 updateData.image_data = existing.image;
                 updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
             }
-            // IMPORTANT: Always preserve the legacy image column to maintain backward compatibility
-            updateData.image = existing.image;
         }
         
         const fields = Object.keys(updateData);
