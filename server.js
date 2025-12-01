@@ -131,8 +131,44 @@ const ensureArticleColumns = () => {
     });
 };
 
+// Ensure required columns exist in partners table (add image BLOB & metadata columns if missing)
+const ensurePartnerColumns = () => {
+    const needed = [
+        { name: 'image_data', sql: 'LONGBLOB' },
+        { name: 'image_mimetype', sql: 'VARCHAR(255)' }
+    ];
+
+    pool.query('SHOW COLUMNS FROM partners', (err, results) => {
+        if (err) {
+            console.error('Failed to check partners table columns:', err.message || err);
+            return;
+        }
+        const existing = new Set(results.map(r => r.Field));
+        const alters = [];
+        needed.forEach(col => {
+            if (!existing.has(col.name)) {
+                alters.push(`ADD COLUMN ${col.name} ${col.sql} DEFAULT NULL`);
+            }
+        });
+        if (alters.length === 0) {
+            console.log('Partners table has required image columns');
+            return;
+        }
+        const q = `ALTER TABLE partners ${alters.join(', ')}`;
+        console.log('Altering partners table to add missing columns:', alters.map(a => a.split(' ')[2]).join(', '));
+        pool.query(q, (aerr) => {
+            if (aerr) {
+                console.error('Failed to add missing columns to partners table:', aerr.message || aerr);
+            } else {
+                console.log('Successfully added missing columns to partners table');
+            }
+        });
+    });
+};
+
 // Run the schema check at startup
 ensureArticleColumns();
+ensurePartnerColumns();
 
 // ================= OPTIONAL ENHANCEMENTS =================
 // For future: Implement audit logging (track admin actions for security and accountability)
