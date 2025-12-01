@@ -894,69 +894,81 @@ app.get("/api/about", (req, res) => {
             return res.status(404).json({ error: "No about data found" });
         }
         const r = results[0];
-        // Normalize binary/blob fields so frontend doesn't receive raw Buffer JSON
         const out = { ...r };
+        const id = r.id || 1;
+        
         try {
-            Object.keys(r).forEach(key => {
-                const val = r[key];
+            Object.keys(out).forEach(key => {
+                const val = out[key];
+                
                 // Handle mysql2 Buffer instances
                 if (Buffer.isBuffer(val)) {
-                    // Try to decode as UTF-8 text
-                    const text = val.toString('utf8').trim();
+                    // Check for image signatures first (PNG, JPEG, GIF, WebP)
+                    const isImage = (buf) => {
+                        if (buf.length < 4) return false;
+                        const head = buf.slice(0, 12);
+                        // PNG signature
+                        if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) return true;
+                        // JPEG signature
+                        if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+                        // GIF signature
+                        if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return true;
+                        // WebP signature
+                        if (buf.length >= 12 && buf.slice(8, 12).toString('ascii') === 'WEBP') return true;
+                        return false;
+                    };
                     
-                    // Detect common image signatures (PNG, JPEG, GIF, WebP)
-                    const head = val.slice(0, 12);
-                    const isPNG = head.slice(0,4).toString() === '\u0089PNG';
-                    const isJPG = val[0] === 0xFF && val[1] === 0xD8 && val[2] === 0xFF;
-                    const isGIF = head.slice(0,3).toString() === 'GIF';
-                    const isWebP = head.slice(8,12).toString() === 'WEBP';
-                    
-                    if (isPNG || isJPG || isGIF || isWebP) {
-                        // Binary image data detected - replace with empty value and expose a per-field image endpoint
+                    if (isImage(val)) {
+                        // Binary image data - replace with empty and provide URL
                         out[key] = '';
-                        const id = r.id || 1;
                         out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
-                        return;
-                    }
-
-                    // If it looks like a non-image text, return as text (not as file path)
-                    if (!text.startsWith('/') && text.length > 0) {
-                        out[key] = text;
+                        console.log(`Detected binary image in ${key} column`);
                         return;
                     }
                     
-                    // Ignore file paths stored in BLOB columns - they're legacy
-                    out[key] = '';
+                    // Try to decode as UTF-8 text
+                    try {
+                        const text = val.toString('utf8').trim();
+                        if (text.length > 0 && !text.startsWith('\x00')) {
+                            out[key] = text;
+                        } else {
+                            out[key] = '';
+                        }
+                    } catch (e) {
+                        out[key] = '';
+                    }
                     return;
-
                 }
-
-                // Handle serialized Buffer objects that may have been JSON-encoded
+                
+                // Handle serialized Buffer objects
                 if (val && typeof val === 'object' && val.type === 'Buffer' && Array.isArray(val.data)) {
                     try {
                         const buf = Buffer.from(val.data);
-                        const text = buf.toString('utf8').trim();
-                        if (text.startsWith('/images/') || text.startsWith('/api/') || text.startsWith('http://') || text.startsWith('https://')) {
-                            out[key] = text;
-                            return;
-                        }
-                        const isJpg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
-                        const isPng = buf.slice(0,4).toString() === '\u0089PNG';
-                        if (isJpg || isPng) {
+                        // Check for image signatures
+                        const isImage = (b) => {
+                            if (b.length < 4) return false;
+                            const head = b.slice(0, 12);
+                            if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) return true;
+                            if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return true;
+                            if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return true;
+                            if (b.length >= 12 && b.slice(8, 12).toString('ascii') === 'WEBP') return true;
+                            return false;
+                        };
+                        
+                        if (isImage(buf)) {
                             out[key] = '';
-                            const id = r.id || 1;
                             out[`${key}_url`] = `/api/about/${id}/image/${encodeURIComponent(key)}`;
+                            console.log(`Detected binary image in serialized ${key} column`);
                             return;
                         }
-                        out[key] = text;
-                        return;
+                        
+                        const text = buf.toString('utf8').trim();
+                        out[key] = text.length > 0 ? text : '';
                     } catch (e) {
-                        out[key] = String(val);
-                        return;
+                        out[key] = '';
                     }
+                    return;
                 }
-
-                // leave other types as-is
             });
         } catch (e) {
             console.error('Error normalizing about row:', e);
