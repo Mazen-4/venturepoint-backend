@@ -214,7 +214,9 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
         // Handle both 'description' and 'details' field names (frontend uses 'details')
         insertData.description = description || details || '';
         if (req.file) {
-            insertData.image_url = `/images/${req.file.filename}`;
+            insertData.image_data = req.file.buffer || null;
+            insertData.image_mimetype = req.file.mimetype || null;
+            insertData.image_url = null; // Will be set to /api/partners/:id/image after insert
         }
         const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
@@ -226,7 +228,16 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
                 }
                 return res.status(500).send(err);
             }
-            res.status(201).json({ success: true, id: result.insertId, partner: { id: result.insertId, ...insertData } });
+            const partnerId = result.insertId;
+            // If image was uploaded, update the image_url to point to the image endpoint
+            if (req.file) {
+                pool.query('UPDATE partners SET image_url = ? WHERE id = ?', [`/api/partners/${partnerId}/image`, partnerId], (err2) => {
+                    if (err2) console.error('Error updating image_url:', err2);
+                    res.status(201).json({ success: true, id: partnerId, partner: { id: partnerId, ...insertData, image_url: `/api/partners/${partnerId}/image` } });
+                });
+            } else {
+                res.status(201).json({ success: true, id: partnerId, partner: { id: partnerId, ...insertData } });
+            }
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -237,8 +248,8 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     const partnerId = req.params.id;
     const { name, description, details, website, ...otherFields } = req.body;
-    // Get old image_url if no new image is uploaded
-    pool.query('SELECT image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {
+    // Get old image data if no new image is uploaded
+    pool.query('SELECT image_url, image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         let updateData = { ...otherFields };
@@ -248,9 +259,13 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
         if (details !== undefined) updateData.description = details;
         if (website !== undefined) updateData.website = website;
         if (req.file) {
-            updateData.image_url = `/images/${req.file.filename}`;
+            updateData.image_data = req.file.buffer || null;
+            updateData.image_mimetype = req.file.mimetype || null;
+            updateData.image_url = `/api/partners/${partnerId}/image`;
         } else {
             updateData.image_url = results[0]?.image_url || '';
+            updateData.image_data = results[0]?.image_data || null;
+            updateData.image_mimetype = results[0]?.image_mimetype || null;
         }
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
@@ -261,6 +276,23 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true, message: 'Partner updated successfully' });
         });
+    });
+});
+
+// Serve partner image from DB blob
+app.get('/api/partners/:id/image', (req, res) => {
+    const partnerId = req.params.id;
+    pool.query('SELECT image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
+        if (err) {
+            console.error('Error fetching partner image:', err);
+            return res.status(500).json({ error: 'Failed to load image' });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: 'Partner not found' });
+        const r = results[0];
+        if (!r.image_data) return res.status(404).json({ error: 'No image found' });
+        const mime = r.image_mimetype || 'image/jpeg';
+        res.setHeader('Content-Type', mime);
+        res.send(r.image_data);
     });
 });
 
