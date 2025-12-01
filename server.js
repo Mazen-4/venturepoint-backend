@@ -340,6 +340,16 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     const partnerId = req.params.id;
     const { name, description, details, website, ...otherFields } = req.body;
+    console.log(`[PARTNER UPDATE] Request to update partner ${partnerId}`);
+    console.log('[PARTNER UPDATE] req.body keys:', Object.keys(req.body));
+    console.log('[PARTNER UPDATE] req.body sample:', {
+        name: req.body.name,
+        description: req.body.description,
+        details: req.body.details,
+        website: req.body.website
+    });
+    console.log('[PARTNER UPDATE] req.file:', req.file ? { originalname: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size } : null);
+
     // Get old image data if no new image is uploaded
         // Include the legacy `image` column so existing images stored in that column are preserved
         pool.query('SELECT image_data, image_mimetype, image, image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
@@ -392,11 +402,18 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
         values.push(partnerId);
         
         console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, fields);
-        
+        console.log('[PARTNER UPDATE] Generated query:', query);
+        try {
+            console.log('[PARTNER UPDATE] Values preview:', values.map(v => (Buffer.isBuffer(v) ? `<Buffer ${v.length} bytes>` : (typeof v === 'string' && v.length > 100 ? v.slice(0, 100) + '...' : v))));
+        } catch (logErr) {
+            console.error('Error while logging update values preview:', logErr);
+        }
+
         pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Error updating partner:', err);
-                return res.status(500).json({ error: err.message });
+                // Return stack during development to aid debugging
+                return res.status(500).json({ error: err.message, stack: err.stack });
             }
             res.json({ success: true, message: 'Partner updated successfully' });
         });
