@@ -83,11 +83,13 @@ const DB_CONFIG = {
     password: process.env.DATABASE_PASSWORD || "Vp_ed#2025%1624*P@s$",
     database: process.env.DATABASE_NAME || "venturepoint_db",
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 10,              
+    maxIdle: 10,                      
+    idleTimeout: 60000,              
     queueLimit: 0,
-    connectionTimeout: 10000, // 10 second timeout instead of infinite
-    enableKeepAlive: true,
-    keepAliveInitialDelayMs: 0
+    connectTimeout: 10000,            
+    enableKeepAlive: true,            
+    keepAliveInitialDelay: 10000      
 };
 
 console.log(`📊 Database Configuration: host=${DB_CONFIG.host}, database=${DB_CONFIG.database}`);
@@ -96,7 +98,48 @@ let pool = mysql.createPool(DB_CONFIG);
 let dbConnected = false;
 let dbRetries = 0;
 const maxRetries = 5;
+// ✅ CRITICAL: Add connection cleanup on pool errors
+pool.on('connection', (connection) => {
+    console.log('New database connection established');
+});
 
+pool.on('error', (err) => {
+    console.error('❌ Database pool error:', err);
+    if (err.code === 'PROTOCOL_CONNECTION_LOST') {
+        console.error('Database connection was closed.');
+    }
+    if (err.code === 'ER_CON_COUNT_ERROR') {
+        console.error('Database has too many connections.');
+    }
+    if (err.code === 'ECONNREFUSED') {
+        console.error('Database connection was refused.');
+    }
+});
+
+// ✅ Add graceful shutdown handling
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, closing database pool...');
+    pool.end((err) => {
+        if (err) {
+            console.error('Error closing pool:', err);
+            process.exit(1);
+        }
+        console.log('Database pool closed successfully');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT received, closing database pool...');
+    pool.end((err) => {
+        if (err) {
+            console.error('Error closing pool:', err);
+            process.exit(1);
+        }
+        console.log('Database pool closed successfully');
+        process.exit(0);
+    });
+});
 // Function to test database connection with retries
 const testDatabaseConnection = () => {
     pool.getConnection((err, connection) => {
@@ -2270,3 +2313,4 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
+
