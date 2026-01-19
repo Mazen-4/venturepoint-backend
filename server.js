@@ -306,47 +306,55 @@ app.get('/image/:id', (req, res) => {
 });
 
 // Get all partners (public)
-app.get('/api/partners', async (req, res) => {
-   try {
-    const [partners] = await db.query(`
-      SELECT id, name, details, image, image_data, image_mimetype
-      FROM partners 
-      ORDER BY id ASC
-    `);
-    
-    // Convert binary image data to base64
-    const partnersWithImages = partners.map(partner => {
-      const result = {
-        id: partner.id,
-        name: partner.name,
-        details: partner.details ? 
-          (partner.details.length > 10000 ? partner.details.substring(0, 10000) + '...' : partner.details) 
-          : null
-      };
-      
-      // Handle image field (if it's binary)
-      if (partner.image && Buffer.isBuffer(partner.image)) {
-        result._imageSrc = `data:image/jpeg;base64,${partner.image.toString('base64')}`;
-      } else if (partner.image) {
-        result.image = partner.image; // It's a URL or filename
-      }
-      
-      // Handle image_data field (if it exists)
-      if (partner.image_data && Buffer.isBuffer(partner.image_data) && partner.image_mimetype) {
-        result._imageSrc = `data:${partner.image_mimetype};base64,${partner.image_data.toString('base64')}`;
-      }
-      
-      return result;
-    });
-    
-    res.json({ data: partnersWithImages });
-  } catch (error) {
-    console.error('Partners API Error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch partners',
-      details: error.message 
-    });
-  }
+app.get("/api/partners", (req, res) => {
+    try {
+        pool.query(`
+            SELECT id, name, details, image, image_data, image_mimetype
+            FROM partners 
+            ORDER BY id ASC
+        `, (err, partners) => {
+            if (err) {
+                console.error('Partners API Error:', err);
+                return res.status(500).json({ 
+                    error: 'Failed to fetch partners',
+                    details: err.message 
+                });
+            }
+            
+            // Convert binary image data to base64
+            const partnersWithImages = partners.map(partner => {
+                const result = {
+                    id: partner.id,
+                    name: partner.name,
+                    details: partner.details ? 
+                        (partner.details.length > 10000 ? partner.details.substring(0, 10000) + '...' : partner.details) 
+                        : null
+                };
+                
+                // Handle image field (if it's binary)
+                if (partner.image && Buffer.isBuffer(partner.image)) {
+                    result._imageSrc = `data:image/jpeg;base64,${partner.image.toString('base64')}`;
+                } else if (partner.image) {
+                    result.image = partner.image; // It's a URL or filename
+                }
+                
+                // Handle image_data field (if it exists)
+                if (partner.image_data && Buffer.isBuffer(partner.image_data) && partner.image_mimetype) {
+                    result._imageSrc = `data:${partner.image_mimetype};base64,${partner.image_data.toString('base64')}`;
+                }
+                
+                return result;
+            });
+            
+            res.json({ data: partnersWithImages });
+        });
+    } catch (error) {
+        console.error('Partners API Error:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch partners',
+            details: error.message 
+        });
+    }
 });
 
 // Get a single partner by ID (public)
