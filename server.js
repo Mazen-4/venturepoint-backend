@@ -307,26 +307,59 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
-    // Explicitly exclude ALL binary/blob columns: image_data, image_mimetype, image, article, article_mimetype
-    // The image is accessible via /api/partners/:id/image endpoint
-    pool.query("SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners`", (err, results) => {
+    // Get pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+    
+    // Validate pagination parameters
+    if (page < 1 || limit < 1 || limit > 200) {
+        return res.status(400).json({ error: 'Invalid pagination parameters' });
+    }
+    
+    // Get total count
+    pool.query("SELECT COUNT(*) as count FROM `partners`", (err, countResults) => {
         if (err) return res.status(500).send(err);
         
-        // Map partners to include image URL if images exist in DB
-        const mapped = results.map(r => {
-            const out = { ...r };
-            
-            // For any partner without image_url already set, set it to the image endpoint
-            // This handles cases where image_url wasn't populated
-            if (!out.image_url && r.id) {
-                out.image_url = `/api/partners/${r.id}/image`;
-            }
-            
-            return out;
-        });
+        const total = countResults[0].count;
+        const totalPages = Math.ceil(total / limit);
         
-        console.log(`[PARTNERS] Returning ${mapped.length} partners`);
-        res.json({ data: mapped });
+        // Get paginated results
+        pool.query(
+            "SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `details`, `created_at`, `updated_at`, `image_url` FROM `partners` ORDER BY `created_at` DESC LIMIT ? OFFSET ?",
+            [limit, offset],
+            (err, results) => {
+                if (err) return res.status(500).send(err);
+                
+                // Truncate details field and map image URLs
+                const mapped = results.map(r => {
+                    const out = { ...r };
+                    
+                    // Truncate long details fields to prevent memory issues
+                    if (out.details && out.details.length > 5000) {
+                        out.details = out.details.substring(0, 5000) + '...';
+                    }
+                    
+                    // Ensure image_url is set to the image endpoint
+                    if (!out.image_url && r.id) {
+                        out.image_url = `/api/partners/${r.id}/image`;
+                    }
+                    
+                    return out;
+                });
+                
+                console.log(`[PARTNERS] Returning page ${page} with ${mapped.length} of ${total} partners`);
+                res.json({
+                    data: mapped,
+                    pagination: {
+                        page,
+                        limit,
+                        total,
+                        totalPages
+                    }
+                });
+            }
+        );
     });
 });
 
