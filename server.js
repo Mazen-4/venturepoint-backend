@@ -262,27 +262,20 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
-    pool.query("SELECT * FROM partners", (err, results) => {
+    // Exclude image_data (BLOB) from SELECT to avoid serialization issues with caching
+    // The image is accessible via /api/partners/:id/image endpoint
+    pool.query("SELECT id, name, description, category, website, email, phone, country, start_year, created_at, updated_at, image_url, image_mimetype FROM partners", (err, results) => {
         if (err) return res.status(500).send(err);
         
-        // Map partners to include image data for frontend preloading
+        // Map partners to include image URL if images exist in DB
         const mapped = results.map(r => {
             const out = { ...r };
-            const hasImageData = r.image_data && r.image_data.length > 0;
-            const hasImage = r.image && r.image.length > 0;
             
-            // If image_data exists (newer uploads), keep it
-            // If image exists (legacy column), move it to image_data for consistent handling
-            if (!hasImageData && hasImage) {
-                out.image_data = r.image;
-                // Try to infer mimetype if not stored
-                if (!out.image_mimetype) {
-                    out.image_mimetype = 'image/jpeg'; // default fallback
-                }
+            // For any partner without image_url already set, set it to the image endpoint
+            // This handles cases where image_url wasn't populated
+            if (!out.image_url && r.id) {
+                out.image_url = `/api/partners/${r.id}/image`;
             }
-            
-            // Indicate whether an image is available; frontend uses the image endpoint directly
-            out.has_image = !!(hasImageData || hasImage);
             
             return out;
         });
@@ -294,35 +287,22 @@ app.get("/api/partners", (req, res) => {
 
 // Get a single partner by ID (public)
 app.get("/api/partners/:id", (req, res) => {
-    pool.query("SELECT * FROM partners WHERE id = ?", [req.params.id], (err, results) => {
+    // Exclude image_data (BLOB) from SELECT to avoid serialization issues
+    pool.query("SELECT id, name, description, category, website, email, phone, country, start_year, created_at, updated_at, image_url, image_mimetype FROM partners WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         
         const partner = results[0];
-        const hasImageData = partner.image_data && partner.image_data.length > 0;
-        const hasImage = partner.image && partner.image.length > 0;
         
-        // If image_data doesn't exist but image does (legacy), copy it over
-        if (!hasImageData && hasImage) {
-            partner.image_data = partner.image;
-            // Try to infer mimetype if not stored
-            if (!partner.image_mimetype) {
-                partner.image_mimetype = 'image/jpeg'; // default fallback
-            }
+        // Ensure image_url is set to the image endpoint
+        if (!partner.image_url && partner.id) {
+            partner.image_url = `/api/partners/${partner.id}/image`;
         }
         
-        // Indicate whether an image is available for this partner
-        partner.has_image = !!(hasImageData || hasImage);
-        
-        // Log what we have
         console.log(`[PARTNER] Fetching partner ${req.params.id}:`, {
             id: partner.id,
             name: partner.name,
-            has_image_data: !!(partner.image_data && partner.image_data.length > 0),
-            image_data_type: typeof partner.image_data,
-            image_data_length: partner.image_data ? partner.image_data.length : 0,
-            image_mimetype: partner.image_mimetype,
-            has_image: partner.has_image
+            image_url: partner.image_url
         });
         
         res.json({ data: partner });
