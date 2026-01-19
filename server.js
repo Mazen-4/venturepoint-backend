@@ -330,19 +330,20 @@ app.get("/api/partners/:id", (req, res) => {
 });
 
 // Add a new partner (admin or superadmin, with image upload)
-app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
+app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     try {
         const { name, description, details, website, ...otherFields } = req.body;
         if (!name) return res.status(400).json({ error: "Partner name required" });
         let insertData = { name, website, ...otherFields };
         // Handle both 'description' and 'details' field names (frontend uses 'details')
         insertData.description = description || details || '';
-        if (req.file) {
-            if (!req.file.buffer) {
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            if (!file.buffer) {
                 return res.status(400).json({ error: 'Image file is empty or corrupted' });
             }
-            insertData.image_data = req.file.buffer;
-            insertData.image_mimetype = req.file.mimetype || 'image/jpeg';
+            insertData.image_data = file.buffer;
+            insertData.image_mimetype = file.mimetype || 'image/jpeg';
             // Don't set image = null in INSERT, just leave it NULL in database
         }
         const fields = Object.keys(insertData).filter(f => insertData[f] !== undefined);
@@ -361,7 +362,7 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
             }
             const partnerId = result.insertId;
             // Respond with created partner metadata; indicate has_image if a file was uploaded
-            const responsePartner = { id: partnerId, ...insertData, has_image: !!req.file };
+            const responsePartner = { id: partnerId, ...insertData, has_image: !!file };
             res.status(201).json({ success: true, id: partnerId, partner: responsePartner });
         });
     } catch (error) {
@@ -371,7 +372,7 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 });
 
 // Update a partner (admin/superadmin, with image upload)
-app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
+app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     try {
         const partnerId = req.params.id;
         const { name, description, details, website } = req.body;
@@ -383,7 +384,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
             details: req.body.details,
             website: req.body.website
         });
-        console.log('[PARTNER UPDATE] req.file:', req.file ? { originalname: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size } : null);
+        console.log('[PARTNER UPDATE] req.files:', req.files ? `${req.files.length} files` : 'no files');
 
         // Get old image data if no new image is uploaded
             // Include the legacy `image` column so existing images stored in that column are preserved
@@ -417,18 +418,19 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                     updateValues.push(website);
                 }
                 
-                if (req.file) {
+                let file = req.files && req.files.length > 0 ? req.files[0] : null;
+                if (file) {
                     // New image uploaded -> write into the new blob column
-                    if (!req.file.buffer) {
+                    if (!file.buffer) {
                         return res.status(400).json({ error: 'Image file is empty or corrupted' });
                     }
                     updateFields.push('image_data = ?');
-                    updateValues.push(req.file.buffer);
+                    updateValues.push(file.buffer);
                     updateFields.push('image_mimetype = ?');
-                    updateValues.push(req.file.mimetype || 'image/jpeg');
+                    updateValues.push(file.mimetype || 'image/jpeg');
                     // Clear legacy column if it exists
                     updateFields.push('image = NULL');
-                    console.log('[PARTNER UPDATE] New image size:', req.file.buffer.length, 'bytes');
+                    console.log('[PARTNER UPDATE] New image size:', file.buffer.length, 'bytes');
                 } else {
                     // No new image - preserve existing image from either image_data or image column
                     const hasImageData = existing.image_data && existing.image_data.length > 0;
