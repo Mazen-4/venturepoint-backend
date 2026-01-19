@@ -326,7 +326,7 @@ app.get("/api/partners", (req, res) => {
         
         // Get paginated results
         pool.query(
-            "SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `details`, `created_at`, `updated_at`, `image_url` FROM `partners` ORDER BY `created_at` DESC LIMIT ? OFFSET ?",
+            "SELECT `id`, `name`, `email`, `phone`, `country`, `start_year`, `details`, `created_at`, `updated_at`, `image_url` FROM `partners` ORDER BY `created_at` DESC LIMIT ? OFFSET ?",
             [limit, offset],
             (err, results) => {
                 if (err) return res.status(500).send(err);
@@ -2348,3 +2348,4 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
+
