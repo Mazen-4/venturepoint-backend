@@ -309,7 +309,7 @@ app.get('/image/:id', (req, res) => {
 app.get("/api/partners", (req, res) => {
     // Explicitly exclude ALL binary/blob columns: image_data, image_mimetype, image, article, article_mimetype
     // The image is accessible via /api/partners/:id/image endpoint
-    pool.query("SELECT `id`, `name`, `description`, `category`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners`", (err, results) => {
+    pool.query("SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners`", (err, results) => {
         if (err) return res.status(500).send(err);
         
         // Map partners to include image URL if images exist in DB
@@ -333,7 +333,7 @@ app.get("/api/partners", (req, res) => {
 // Get a single partner by ID (public)
 app.get("/api/partners/:id", (req, res) => {
     // Explicitly exclude ALL binary/blob columns
-    pool.query("SELECT `id`, `name`, `description`, `category`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners` WHERE `id` = ?", [req.params.id], (err, results) => {
+    pool.query("SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners` WHERE `id` = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         
