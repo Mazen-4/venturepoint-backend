@@ -76,23 +76,59 @@ const upload = multer({
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
-const pool = mysql.createPool({
-    host: "148.72.3.185",
-    user: "vp_DBAdmin",
-    password: "Vp_ed#2025%1624*P@s$",
-    database: "venturepoint_db",
+// Database configuration - use environment variables
+const DB_CONFIG = {
+    host: process.env.DATABASE_HOST || "148.72.3.185",
+    user: process.env.DATABASE_USER || "vp_DBAdmin",
+    password: process.env.DATABASE_PASSWORD || "Vp_ed#2025%1624*P@s$",
+    database: process.env.DATABASE_NAME || "venturepoint_db",
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
-});
-pool.getConnection((err, connection) => {
-    if (err) {
-        console.error("❌ DB pool connection failed: ", err);
-        return;
-    }
-    console.log("✅ Connected to MySQL database (pool)");
-    connection.release();
-});
+    queueLimit: 0,
+    connectionTimeout: 10000, // 10 second timeout instead of infinite
+    enableKeepAlive: true,
+    keepAliveInitialDelayMs: 0
+};
+
+console.log(`📊 Database Configuration: host=${DB_CONFIG.host}, database=${DB_CONFIG.database}`);
+
+let pool = mysql.createPool(DB_CONFIG);
+let dbConnected = false;
+let dbRetries = 0;
+const maxRetries = 5;
+
+// Function to test database connection with retries
+const testDatabaseConnection = () => {
+    pool.getConnection((err, connection) => {
+        if (err) {
+            dbRetries++;
+            console.error(`❌ DB connection attempt ${dbRetries}/${maxRetries} failed:`, err.code || err.message);
+            
+            if (dbRetries < maxRetries) {
+                // Retry with exponential backoff
+                const delay = Math.pow(2, dbRetries) * 1000; // 2s, 4s, 8s, 16s, 32s
+                console.log(`⏳ Retrying database connection in ${delay}ms...`);
+                setTimeout(testDatabaseConnection, delay);
+            } else {
+                console.error(`❌ Failed to connect to database after ${maxRetries} attempts`);
+                console.error(`⚠️  CRITICAL: Database is unreachable at ${DB_CONFIG.host}`);
+                console.error(`⚠️  Possible causes:`);
+                console.error(`   1. Database server is offline`);
+                console.error(`   2. Database host is on local network (Render cannot reach local IPs)`);
+                console.error(`   3. Render IP is not whitelisted in database firewall`);
+                console.error(`   4. Incorrect credentials in environment variables`);
+                console.error(`⚠️  Solution: Move database to cloud (AWS RDS, DigitalOcean, PlanetScale)`);
+            }
+            return;
+        }
+        dbConnected = true;
+        console.log("✅ Connected to MySQL database (pool)");
+        connection.release();
+    });
+};
+
+// Initial connection test
+testDatabaseConnection();
 
 // Ensure required columns exist in articles table (add blob & metadata columns if missing)
 const ensureArticleColumns = () => {
