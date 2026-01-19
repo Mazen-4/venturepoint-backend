@@ -307,60 +307,43 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
-    // Get pagination parameters
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const offset = (page - 1) * limit;
-    
-    // Validate pagination parameters
-    if (page < 1 || limit < 1 || limit > 200) {
-        return res.status(400).json({ error: 'Invalid pagination parameters' });
-    }
-    
-    // Get total count
-    pool.query("SELECT COUNT(*) as count FROM `partners`", (err, countResults) => {
-        if (err) return res.status(500).send(err);
-        
-        const total = countResults[0].count;
-        const totalPages = Math.ceil(total / limit);
-        
-        // Get paginated results
-        pool.query(
-            "SELECT `id`, `name`, `email`, `phone`, `country`, `start_year`, `details`, `created_at`, `updated_at`, `image_url` FROM `partners` ORDER BY `created_at` DESC LIMIT ? OFFSET ?",
-            [limit, offset],
-            (err, results) => {
-                if (err) return res.status(500).send(err);
-                
-                // Truncate details field and map image URLs
-                const mapped = results.map(r => {
-                    const out = { ...r };
-                    
-                    // Truncate long details fields to prevent memory issues
-                    if (out.details && out.details.length > 5000) {
-                        out.details = out.details.substring(0, 5000) + '...';
-                    }
-                    
-                    // Ensure image_url is set to the image endpoint
-                    if (!out.image_url && r.id) {
-                        out.image_url = `/api/partners/${r.id}/image`;
-                    }
-                    
-                    return out;
-                });
-                
-                console.log(`[PARTNERS] Returning page ${page} with ${mapped.length} of ${total} partners`);
-                res.json({
-                    data: mapped,
-                    pagination: {
-                        page,
-                        limit,
-                        total,
-                        totalPages
-                    }
+    try {
+        pool.query(`
+            SELECT id, name, details, image, image_data, image_mimetype
+            FROM partners 
+            ORDER BY id ASC
+        `, (err, partners) => {
+            if (err) {
+                console.error('Partners API Error:', err);
+                return res.status(500).json({ 
+                    error: 'Failed to fetch partners',
+                    details: err.message 
                 });
             }
-        );
-    });
+            
+            // Convert image_data to base64 if it exists
+            const partnersWithImages = partners.map(partner => {
+                if (partner.image_data && partner.image_mimetype) {
+                    const base64Image = partner.image_data.toString('base64');
+                    return {
+                        ...partner,
+                        _imageSrc: `data:${partner.image_mimetype};base64,${base64Image}`,
+                        image_data: undefined, // Don't send raw binary
+                        image_mimetype: undefined
+                    };
+                }
+                return partner;
+            });
+            
+            res.json({ data: partnersWithImages });
+        });
+    } catch (error) {
+        console.error('Partners API Error:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch partners',
+            details: error.message 
+        });
+    }
 });
 
 // Get a single partner by ID (public)
@@ -2348,4 +2331,3 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
-
