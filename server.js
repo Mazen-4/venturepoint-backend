@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -305,9 +307,9 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
-    // Exclude image_data (BLOB) from SELECT to avoid serialization issues with caching
+    // Explicitly exclude ALL binary/blob columns: image_data, image_mimetype, image, article, article_mimetype
     // The image is accessible via /api/partners/:id/image endpoint
-    pool.query("SELECT id, name, description, category, website, email, phone, country, start_year, created_at, updated_at, image_url, image_mimetype FROM partners", (err, results) => {
+    pool.query("SELECT `id`, `name`, `description`, `category`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners`", (err, results) => {
         if (err) return res.status(500).send(err);
         
         // Map partners to include image URL if images exist in DB
@@ -330,8 +332,8 @@ app.get("/api/partners", (req, res) => {
 
 // Get a single partner by ID (public)
 app.get("/api/partners/:id", (req, res) => {
-    // Exclude image_data (BLOB) from SELECT to avoid serialization issues
-    pool.query("SELECT id, name, description, category, website, email, phone, country, start_year, created_at, updated_at, image_url, image_mimetype FROM partners WHERE id = ?", [req.params.id], (err, results) => {
+    // Explicitly exclude ALL binary/blob columns
+    pool.query("SELECT `id`, `name`, `description`, `category`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners` WHERE `id` = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         
@@ -2313,4 +2315,3 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
-
