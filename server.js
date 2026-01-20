@@ -469,7 +469,20 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                 return res.status(500).json({ error: err.message });
             }
             console.log(`[PARTNER UPDATE] Success for partner ${partnerId}`);
-            res.json({ success: true, message: 'Partner updated successfully' });
+            // Return the updated partner (without binary fields)
+            pool.query('SELECT * FROM partners WHERE id = ?', [partnerId], (sErr, sResults) => {
+                if (sErr) return res.status(500).json({ error: sErr.message });
+                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Partner not found after update' });
+                const partner = sResults[0];
+                const out = { ...partner };
+                delete out.image_data;
+                delete out.image_mimetype;
+                delete out.image_name;
+                if (partner.image_data && partner.image_data.length > 0) {
+                    out.image_url = `/api/partners/${partner.id}/image`;
+                }
+                res.json({ success: true, message: 'Partner updated successfully', data: out });
+            });
         });
     });
 });
@@ -698,7 +711,20 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
         values.push(advisorId);
         pool.query(query, values, (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, message: 'Advisor updated successfully' });
+            // Fetch and return the updated advisor (omit binary fields)
+            pool.query('SELECT * FROM advisors WHERE id = ?', [advisorId], (sErr, sResults) => {
+                if (sErr) return res.status(500).json({ error: sErr.message });
+                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Advisor not found after update' });
+                const advisor = sResults[0];
+                const out = { ...advisor };
+                delete out.photo_data;
+                delete out.photo_mimetype;
+                delete out.photo_name;
+                if (advisor.photo_data && advisor.photo_data.length > 0) {
+                    out.photo_url = `/api/advisors/${advisor.id}/photo`;
+                }
+                res.json({ success: true, message: 'Advisor updated successfully', data: out });
+            });
         });
     });
 });
@@ -781,7 +807,11 @@ app.put("/api/authors/:id", authenticateToken, requireAnyRole(["admin", "superad
     pool.query("UPDATE authors SET name = ? WHERE id = ?", [name, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
-        res.json({ success: true, message: "Author updated successfully" });
+        pool.query('SELECT id, name FROM authors WHERE id = ?', [req.params.id], (sErr, sResults) => {
+            if (sErr) return res.status(500).json({ error: sErr.message });
+            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Author not found after update' });
+            res.json({ success: true, message: 'Author updated successfully', data: sResults[0] });
+        });
     });
 });
 
@@ -923,7 +953,20 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
                 console.error('Update event error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
             }
-            res.json({ success: true, message: 'Event updated successfully' });
+            // Return the updated event (strip binary fields and map image_url)
+            pool.query('SELECT * FROM events WHERE id = ?', [eventId], (sErr, sResults) => {
+                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated event', error: sErr.message });
+                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Event not found after update' });
+                const ev = sResults[0];
+                const out = { ...ev };
+                delete out.image_data;
+                delete out.image_mimetype;
+                delete out.image_name;
+                if (ev.image_data && ev.image_data.length > 0) {
+                    out.image_url = `/api/events/${ev.id}/image`;
+                }
+                res.json({ success: true, message: 'Event updated successfully', data: out });
+            });
         });
     });
 });
@@ -1625,7 +1668,12 @@ app.put("/api/services/:id", authenticateToken, (req, res) => {
     res.set('Cache-Control', 'no-store');
     pool.query("UPDATE services SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
-        res.json({ success: true });
+        // Return updated service
+        pool.query('SELECT * FROM services WHERE id = ?', [req.params.id], (sErr, sResults) => {
+            if (sErr) return res.status(500).send(sErr);
+            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Service not found after update' });
+            res.json({ success: true, data: sResults[0] });
+        });
     });
 });
 
@@ -1744,12 +1792,33 @@ app.put('/api/team/:id', upload.any(), (req, res) => {
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE team_members SET ${setClause} WHERE id = ?`;
         values.push(memberId);
-    pool.query(query, values, (err, result) => {
+        pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Update member error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
             }
-            res.json({ success: true, message: 'Member updated successfully' });
+
+            // ✅ CRITICAL FIX: Fetch and return the updated member data
+            pool.query('SELECT * FROM team_members WHERE id = ?', [memberId], (fetchErr, fetchResults) => {
+                if (fetchErr) {
+                    console.error('Fetch updated member error:', fetchErr);
+                    return res.json({ success: true, message: 'Member updated successfully' });
+                }
+
+                const updatedMember = fetchResults[0];
+                // Remove binary fields from response
+                const memberResponse = { ...updatedMember };
+                delete memberResponse.photo_data;
+                delete memberResponse.photo_mimetype;
+                delete memberResponse.photo_name;
+
+                // Return updated member in the expected format
+                res.json({ 
+                    success: true, 
+                    message: 'Member updated successfully',
+                    data: memberResponse
+                });
+            });
         });
     });
 });
@@ -1910,7 +1979,20 @@ app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
                 console.error('Update project error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
             }
-            res.json({ success: true, message: 'Project updated successfully' });
+            // Return updated project without binary image fields
+            pool.query('SELECT * FROM projects WHERE id = ?', [projectId], (sErr, sResults) => {
+                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated project', error: sErr.message });
+                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Project not found after update' });
+                const proj = sResults[0];
+                const out = { ...proj };
+                delete out.image_data;
+                delete out.image_mimetype;
+                delete out.image_name;
+                if (proj.image_data && proj.image_data.length > 0) {
+                    out.image_url = `/api/projects/${proj.id}/image`;
+                }
+                res.json({ success: true, message: 'Project updated successfully', data: out });
+            });
         });
     });
 });
@@ -2071,7 +2153,20 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
                 // Do not dump binary data into logs
                 return res.status(500).json({ success: false, message: 'Database error while updating article', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
             }
-            res.json({ success: true });
+            // Return updated article (strip binary fields and expose file endpoint if present)
+            pool.query('SELECT * FROM articles WHERE id = ?', [req.params.id], (sErr, sResults) => {
+                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated article', error: sErr.message });
+                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Article not found after update' });
+                const art = sResults[0];
+                const out = { ...art };
+                delete out.article;
+                delete out.article_mimetype;
+                delete out.article_name;
+                if (art.article && art.article.length > 0) {
+                    out.article_url = `/api/articles/${art.id}/file`;
+                }
+                res.json({ success: true, data: out });
+            });
         });
     } catch (err) {
         console.error('Unexpected error in PUT /api/articles/:id', err);
@@ -2218,7 +2313,20 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
                     console.error('Update event error:', err);
                     return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
                 }
-                res.json({ success: true, message: 'Event updated successfully' });
+                // Return the updated event (strip binary fields and map image_url)
+                pool.query('SELECT * FROM events WHERE id = ?', [eventId], (sErr, sResults) => {
+                    if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated event', error: sErr.message });
+                    if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Event not found after update' });
+                    const ev = sResults[0];
+                    const out = { ...ev };
+                    delete out.image_data;
+                    delete out.image_mimetype;
+                    delete out.image_name;
+                    if (ev.image_data && ev.image_data.length > 0) {
+                        out.image_url = `/api/events/${ev.id}/image`;
+                    }
+                    res.json({ success: true, message: 'Event updated successfully', data: out });
+                });
             });
         });
     } catch (error) {
@@ -2269,7 +2377,12 @@ app.post("/api/jobs", authenticateToken, (req, res) => {
 app.put("/api/jobs/:id", authenticateToken, (req, res) => {
     pool.query("UPDATE job_postings SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
-        res.json({ success: true });
+        // Return updated job posting
+        pool.query('SELECT * FROM job_postings WHERE id = ?', [req.params.id], (sErr, sResults) => {
+            if (sErr) return res.status(500).send(sErr);
+            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Job not found after update' });
+            res.json({ success: true, data: sResults[0] });
+        });
     });
 });
 
