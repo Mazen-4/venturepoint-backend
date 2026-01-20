@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 // ================== ALL REQUIRES AND CONSTS AT TOP ==================
 const analyticsRouter = require('./routes/analytics');
 const express = require("express");
@@ -25,17 +23,8 @@ app.use(cors({
     exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
 }));
 
-// Middleware to handle both JSON and multipart form data
-app.use((req, res, next) => {
-    // Skip body parsing for file upload routes - let multer handle them
-    if ((req.method === 'POST' || req.method === 'PUT') && req.headers['content-type']?.includes('multipart/form-data')) {
-        return next();
-    }
-    express.json()(req, res, () => {
-        express.urlencoded({ extended: true })(req, res, next);
-    });
-});
-
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
@@ -85,11 +74,6 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter, // keep existing filter
 });
-
-// Apply multer to handle multipart form data for team updates
-// This must be after upload is defined
-app.use('/api/team', upload.any());
-
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Database configuration - use environment variables
@@ -99,13 +83,11 @@ const DB_CONFIG = {
     password: process.env.DATABASE_PASSWORD || "Vp_ed#2025%1624*P@s$",
     database: process.env.DATABASE_NAME || "venturepoint_db",
     waitForConnections: true,
-    connectionLimit: 10,              
-    maxIdle: 10,                      
-    idleTimeout: 60000,              
+    connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: 10000,            
-    enableKeepAlive: true,            
-    keepAliveInitialDelay: 10000      
+    connectionTimeout: 10000, // 10 second timeout instead of infinite
+    enableKeepAlive: true,
+    keepAliveInitialDelayMs: 0
 };
 
 console.log(`📊 Database Configuration: host=${DB_CONFIG.host}, database=${DB_CONFIG.database}`);
@@ -114,48 +96,7 @@ let pool = mysql.createPool(DB_CONFIG);
 let dbConnected = false;
 let dbRetries = 0;
 const maxRetries = 5;
-// ✅ CRITICAL: Add connection cleanup on pool errors
-pool.on('connection', (connection) => {
-    console.log('New database connection established');
-});
 
-pool.on('error', (err) => {
-    console.error('❌ Database pool error:', err);
-    if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-        console.error('Database connection was closed.');
-    }
-    if (err.code === 'ER_CON_COUNT_ERROR') {
-        console.error('Database has too many connections.');
-    }
-    if (err.code === 'ECONNREFUSED') {
-        console.error('Database connection was refused.');
-    }
-});
-
-// ✅ Add graceful shutdown handling
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, closing database pool...');
-    pool.end((err) => {
-        if (err) {
-            console.error('Error closing pool:', err);
-            process.exit(1);
-        }
-        console.log('Database pool closed successfully');
-        process.exit(0);
-    });
-});
-
-process.on('SIGINT', () => {
-    console.log('SIGINT received, closing database pool...');
-    pool.end((err) => {
-        if (err) {
-            console.error('Error closing pool:', err);
-            process.exit(1);
-        }
-        console.log('Database pool closed successfully');
-        process.exit(0);
-    });
-});
 // Function to test database connection with retries
 const testDatabaseConnection = () => {
     pool.getConnection((err, connection) => {
@@ -321,76 +262,67 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
-    try {
-        pool.query(`
-            SELECT id, name, details, image, image_data, image_mimetype
-            FROM partners 
-            ORDER BY id ASC
-        `, (err, partners) => {
-            if (err) {
-                console.error('Partners API Error:', err);
-                return res.status(500).json({ 
-                    error: 'Failed to fetch partners',
-                    details: err.message 
-                });
+    pool.query("SELECT * FROM partners", (err, results) => {
+        if (err) return res.status(500).send(err);
+        
+        // Map partners to include image data for frontend preloading
+        const mapped = results.map(r => {
+            const out = { ...r };
+            const hasImageData = r.image_data && r.image_data.length > 0;
+            const hasImage = r.image && r.image.length > 0;
+            
+            // If image_data exists (newer uploads), keep it
+            // If image exists (legacy column), move it to image_data for consistent handling
+            if (!hasImageData && hasImage) {
+                out.image_data = r.image;
+                // Try to infer mimetype if not stored
+                if (!out.image_mimetype) {
+                    out.image_mimetype = 'image/jpeg'; // default fallback
+                }
             }
             
-            // Convert binary image data to base64
-            const partnersWithImages = partners.map(partner => {
-                const result = {
-                    id: partner.id,
-                    name: partner.name,
-                    details: partner.details ? 
-                        (partner.details.length > 10000 ? partner.details.substring(0, 10000) + '...' : partner.details) 
-                        : null
-                };
-                
-                // Handle image field (if it's binary)
-                if (partner.image && Buffer.isBuffer(partner.image)) {
-                    result._imageSrc = `data:image/jpeg;base64,${partner.image.toString('base64')}`;
-                } else if (partner.image) {
-                    result.image = partner.image; // It's a URL or filename
-                }
-                
-                // Handle image_data field (if it exists)
-                if (partner.image_data && Buffer.isBuffer(partner.image_data) && partner.image_mimetype) {
-                    result._imageSrc = `data:${partner.image_mimetype};base64,${partner.image_data.toString('base64')}`;
-                }
-                
-                return result;
-            });
+            // Indicate whether an image is available; frontend uses the image endpoint directly
+            out.has_image = !!(hasImageData || hasImage);
             
-            res.json({ data: partnersWithImages });
+            return out;
         });
-    } catch (error) {
-        console.error('Partners API Error:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch partners',
-            details: error.message 
-        });
-    }
+        
+        console.log(`[PARTNERS] Returning ${mapped.length} partners`);
+        res.json({ data: mapped });
+    });
 });
 
 // Get a single partner by ID (public)
 app.get("/api/partners/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
-    // Explicitly exclude ALL binary/blob columns
-    pool.query("SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners` WHERE `id` = ?", [req.params.id], (err, results) => {
+    pool.query("SELECT * FROM partners WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
         
         const partner = results[0];
+        const hasImageData = partner.image_data && partner.image_data.length > 0;
+        const hasImage = partner.image && partner.image.length > 0;
         
-        // Ensure image_url is set to the image endpoint
-        if (!partner.image_url && partner.id) {
-            partner.image_url = `/api/partners/${partner.id}/image`;
+        // If image_data doesn't exist but image does (legacy), copy it over
+        if (!hasImageData && hasImage) {
+            partner.image_data = partner.image;
+            // Try to infer mimetype if not stored
+            if (!partner.image_mimetype) {
+                partner.image_mimetype = 'image/jpeg'; // default fallback
+            }
         }
         
+        // Indicate whether an image is available for this partner
+        partner.has_image = !!(hasImageData || hasImage);
+        
+        // Log what we have
         console.log(`[PARTNER] Fetching partner ${req.params.id}:`, {
             id: partner.id,
             name: partner.name,
-            image_url: partner.image_url
+            has_image_data: !!(partner.image_data && partner.image_data.length > 0),
+            image_data_type: typeof partner.image_data,
+            image_data_length: partner.image_data ? partner.image_data.length : 0,
+            image_mimetype: partner.image_mimetype,
+            has_image: partner.has_image
         });
         
         res.json({ data: partner });
@@ -399,7 +331,6 @@ app.get("/api/partners/:id", (req, res) => {
 
 // Add a new partner (admin or superadmin, with image upload)
 app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     try {
         const { name, description, details, website, ...otherFields } = req.body;
         if (!name) return res.status(400).json({ error: "Partner name required" });
@@ -442,68 +373,116 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 
 // Update a partner (admin/superadmin, with image upload)
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const partnerId = req.params.id;
-    const { name, details } = req.body;
-    console.log(`[PARTNER UPDATE] Updating partner ${partnerId}`, { name: !!name, details: !!details, hasFile: !!req.files?.length });
-    
-    pool.query('SELECT image, image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
-        if (err) {
-            console.error('[PARTNER UPDATE] Fetch error:', err);
-            return res.status(500).json({ error: err.message });
-        }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Partner not found' });
-        
-        let updateData = {};
-        if (name !== undefined) updateData.name = name;
-        if (details !== undefined) updateData.details = details;
-        
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            console.log(`[PARTNER UPDATE] New image: ${file.originalname}, size: ${file.buffer?.length} bytes`);
-            updateData.image_data = file.buffer || null;
-            updateData.image_mimetype = file.mimetype || 'image/jpeg';
-            updateData.image = null; // Clear legacy column
-        }
-        
-        const fields = Object.keys(updateData);
-        if (fields.length === 0) {
-            return res.status(400).json({ error: 'No fields to update' });
-        }
-        
-        const values = fields.map(f => updateData[f]);
-        const setClause = fields.map(f => `${f} = ?`).join(', ');
-        const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
-        values.push(partnerId);
-        
-        console.log(`[PARTNER UPDATE] Query: ${query}`);
-        pool.query(query, values, (err, result) => {
-            if (err) {
-                console.error('[PARTNER UPDATE] Update error:', err);
-                return res.status(500).json({ error: err.message });
-            }
-            console.log(`[PARTNER UPDATE] Success for partner ${partnerId}`);
-            // Return the updated partner (without binary fields)
-            pool.query('SELECT * FROM partners WHERE id = ?', [partnerId], (sErr, sResults) => {
-                if (sErr) return res.status(500).json({ error: sErr.message });
-                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Partner not found after update' });
-                const partner = sResults[0];
-                const out = { ...partner };
-                delete out.image_data;
-                delete out.image_mimetype;
-                delete out.image_name;
-                if (partner.image_data && partner.image_data.length > 0) {
-                    out.image_url = `/api/partners/${partner.id}/image`;
-                }
-                res.json({ success: true, message: 'Partner updated successfully', data: out });
-            });
+    try {
+        const partnerId = req.params.id;
+        const { name, description, details, website } = req.body;
+        console.log(`[PARTNER UPDATE] Request to update partner ${partnerId}`);
+        console.log('[PARTNER UPDATE] req.body keys:', Object.keys(req.body));
+        console.log('[PARTNER UPDATE] req.body sample:', {
+            name: req.body.name,
+            description: req.body.description,
+            details: req.body.details,
+            website: req.body.website
         });
-    });
+        console.log('[PARTNER UPDATE] req.files:', req.files ? `${req.files.length} files` : 'no files');
+
+        // Get old image data if no new image is uploaded
+            // Include the legacy `image` column so existing images stored in that column are preserved
+            // NOTE: some databases may not have an `image_url` column; do NOT select it here to avoid ER_BAD_FIELD_ERROR
+            pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
+                if (err) {
+                    console.error('Error fetching partner for update:', err);
+                    return res.status(500).json({ error: 'Failed to fetch partner: ' + err.message });
+                }
+                if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
+                
+                const existing = results[0];
+                let updateFields = [];
+                let updateValues = [];
+                
+                if (name !== undefined && name !== '') {
+                    updateFields.push('name = ?');
+                    updateValues.push(name);
+                }
+                // Handle both 'description' and 'details' field names (frontend uses 'details')
+                if (description !== undefined && description !== '') {
+                    updateFields.push('description = ?');
+                    updateValues.push(description);
+                }
+                if (details !== undefined && details !== '') {
+                    updateFields.push('description = ?');
+                    updateValues.push(details);
+                }
+                if (website !== undefined && website !== '') {
+                    updateFields.push('website = ?');
+                    updateValues.push(website);
+                }
+                
+                let file = req.files && req.files.length > 0 ? req.files[0] : null;
+                if (file) {
+                    // New image uploaded -> write into the new blob column
+                    if (!file.buffer) {
+                        return res.status(400).json({ error: 'Image file is empty or corrupted' });
+                    }
+                    updateFields.push('image_data = ?');
+                    updateValues.push(file.buffer);
+                    updateFields.push('image_mimetype = ?');
+                    updateValues.push(file.mimetype || 'image/jpeg');
+                    // Clear legacy column if it exists
+                    updateFields.push('image = NULL');
+                    console.log('[PARTNER UPDATE] New image size:', file.buffer.length, 'bytes');
+                } else {
+                    // No new image - preserve existing image from either image_data or image column
+                    const hasImageData = existing.image_data && existing.image_data.length > 0;
+                    const hasImage = existing.image && existing.image.length > 0;
+                    
+                    if (hasImageData) {
+                        updateFields.push('image_data = ?');
+                        updateValues.push(existing.image_data);
+                        updateFields.push('image_mimetype = ?');
+                        updateValues.push(existing.image_mimetype || 'image/jpeg');
+                    } else if (hasImage) {
+                        // copy legacy `image` into `image_data` so the rest of the app uses a single column
+                        updateFields.push('image_data = ?');
+                        updateValues.push(existing.image);
+                        updateFields.push('image_mimetype = ?');
+                        updateValues.push(existing.image_mimetype || 'image/jpeg');
+                    }
+                }
+                
+                if (updateFields.length === 0) {
+                    return res.status(400).json({ error: 'No update fields provided' });
+                }
+                
+                updateValues.push(partnerId);
+                const setClause = updateFields.join(', ');
+                const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
+
+                console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, updateFields);
+                console.log('[PARTNER UPDATE] Generated query:', query);
+                try {
+                    console.log('[PARTNER UPDATE] Values preview:', updateValues.map(v => (Buffer.isBuffer(v) ? `<Buffer ${v.length} bytes>` : (typeof v === 'string' && v.length > 100 ? v.slice(0, 100) + '...' : v))));
+                } catch (logErr) {
+                    console.error('Error while logging update values preview:', logErr);
+                }
+
+                pool.query(query, updateValues, (err, result) => {
+                    if (err) {
+                        console.error('Error updating partner:', err);
+                        return res.status(500).json({ error: 'Database error: ' + err.message });
+                    }
+                    console.log('[PARTNER UPDATE] Successfully updated partner', partnerId);
+                    res.json({ success: true, message: 'Partner updated successfully' });
+                });
+            });
+    } catch (error) {
+        console.error('[PARTNER UPDATE] Exception:', error);
+        res.status(500).json({ error: 'Server error: ' + error.message });
+    }
 });
 
 // Serve partner image from DB blob (from either image_data or image column)
 app.get('/api/partners/:id/image', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600');
     const partnerId = req.params.id;
     pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
         if (err) {
@@ -542,7 +521,6 @@ app.get('/api/partners/:id/image', (req, res) => {
 
 // Delete a partner (superadmin only)
 app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM partners WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Partner not found" });
@@ -556,7 +534,6 @@ app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (r
 // ===== AUTHORS CRUD =====
 // Get all authors (public)
 app.get("/api/authors", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM authors", (err, results) => {
         if (err) return res.status(500).send(err);
         res.json({ data: results });
@@ -565,8 +542,6 @@ app.get("/api/authors", (req, res) => {
 
 // GET /api/advisors - Fetch all advisors
 app.get('/api/advisors', (req, res) => {
-    // Prevent aggressive caching of dynamic advisor list data
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     console.log('Fetching advisors from database...');
     const query = `
         SELECT *
@@ -607,8 +582,6 @@ app.get('/api/advisors', (req, res) => {
 
 // GET /api/advisors/:id - Fetch a specific advisor by ID
 app.get('/api/advisors/:id', (req, res) => {
-    // Prevent aggressive caching of dynamic advisor data
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     const advisorId = req.params.id;
     console.log(`Fetching advisor with ID: ${advisorId}`);
     const query = `
@@ -642,8 +615,6 @@ app.get('/api/advisors/:id', (req, res) => {
 
 // POST /api/advisors - Create a new advisor (admin/superadmin, with image upload)
 app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
-    // Prevent caching of POST responses with dynamic content
-    res.set('Cache-Control', 'no-store');
     try {
         const { name, area_of_focus, bio, is_top_advisor } = req.body;
         if (!name || !area_of_focus || !bio) {
@@ -688,10 +659,8 @@ app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmi
 
 // PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
 app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
-    // Prevent caching of PUT responses with dynamic content
-    res.set('Cache-Control', 'no-store');
     const advisorId = req.params.id;
-    const { name, area_of_focus, bio, is_top_advisor, removePhoto } = req.body;
+    const { name, area_of_focus, bio, is_top_advisor } = req.body;
     pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
@@ -700,23 +669,14 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
         if (area_of_focus !== undefined) updateData.area_of_focus = area_of_focus;
         if (bio !== undefined) updateData.bio = bio;
         if (is_top_advisor !== undefined && is_top_advisor !== null) updateData.is_top_advisor = is_top_advisor;
-        
-        // Handle photo removal
-        if (removePhoto === 'true') {
-            updateData.photo_name = null;
-            updateData.photo_mimetype = null;
-            updateData.photo_data = null;
-            updateData.photo_url = null;
+        let file = req.files && req.files.length > 0 ? req.files[0] : null;
+        if (file) {
+            updateData.photo_name = file.originalname || file.filename || null;
+            updateData.photo_mimetype = file.mimetype || null;
+            updateData.photo_data = file.buffer || null;
+            updateData.photo_url = `/api/advisors/${advisorId}/photo`;
         } else {
-            let file = req.files && req.files.length > 0 ? req.files[0] : null;
-            if (file) {
-                updateData.photo_name = file.originalname || file.filename || null;
-                updateData.photo_mimetype = file.mimetype || null;
-                updateData.photo_data = file.buffer || null;
-                updateData.photo_url = `/api/advisors/${advisorId}/photo`;
-            } else {
-                updateData.photo_url = results[0]?.photo_url || '';
-            }
+            updateData.photo_url = results[0]?.photo_url || '';
         }
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
@@ -725,28 +685,13 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
         values.push(advisorId);
         pool.query(query, values, (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
-            // Fetch and return the updated advisor (omit binary fields)
-            pool.query('SELECT * FROM advisors WHERE id = ?', [advisorId], (sErr, sResults) => {
-                if (sErr) return res.status(500).json({ error: sErr.message });
-                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Advisor not found after update' });
-                const advisor = sResults[0];
-                const out = { ...advisor };
-                delete out.photo_data;
-                delete out.photo_mimetype;
-                delete out.photo_name;
-                if (advisor.photo_data && advisor.photo_data.length > 0) {
-                    out.photo_url = `/api/advisors/${advisor.id}/photo`;
-                }
-                res.json({ success: true, message: 'Advisor updated successfully', data: out });
-            });
+            res.json({ success: true, message: 'Advisor updated successfully' });
         });
     });
 });
 
 // Serve advisor photo from DB blob or filesystem path
 app.get('/api/advisors/:id/photo', (req, res) => {
-    // Allow moderate caching for photo assets (they change infrequently)
-    res.set('Cache-Control', 'public, max-age=3600');
     const advisorId = req.params.id;
     pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) {
@@ -778,8 +723,6 @@ app.get('/api/advisors/:id/photo', (req, res) => {
 
 // DELETE /api/advisors/:id - Delete an advisor (superadmin only)
 app.delete('/api/advisors/:id', authenticateToken, requireRole('superadmin'), (req, res) => {
-    // Prevent caching of DELETE responses
-    res.set('Cache-Control', 'no-store');
     pool.query('DELETE FROM advisors WHERE id = ?', [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: 'Advisor not found' });
@@ -789,7 +732,6 @@ app.delete('/api/advisors/:id', authenticateToken, requireRole('superadmin'), (r
 
 // Get a single author by ID (public)
 app.get("/api/authors/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM authors WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Author not found" });
@@ -799,7 +741,6 @@ app.get("/api/authors/:id", (req, res) => {
 
 // Add a new author (admin or superadmin)
 app.post("/api/authors", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Author name required" });
     pool.query("INSERT INTO authors (name) VALUES (?)", [name], (err, result) => {
@@ -815,23 +756,17 @@ app.post("/api/authors", authenticateToken, requireAnyRole(["admin", "superadmin
 
 // Update an author (admin or superadmin)
 app.put("/api/authors/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Author name required" });
     pool.query("UPDATE authors SET name = ? WHERE id = ?", [name, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
-        pool.query('SELECT id, name FROM authors WHERE id = ?', [req.params.id], (sErr, sResults) => {
-            if (sErr) return res.status(500).json({ error: sErr.message });
-            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Author not found after update' });
-            res.json({ success: true, message: 'Author updated successfully', data: sResults[0] });
-        });
+        res.json({ success: true, message: "Author updated successfully" });
     });
 });
 
 // Delete an author (superadmin only)
 app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM authors WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
@@ -843,7 +778,6 @@ app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (re
 // EVENTS CRUD - consolidated handlers that store images as DB blobs
 // Get all events (public) - map blob rows to image endpoint and strip binary fields
 app.get("/api/events", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM events", (err, results) => {
         if (err) return res.status(500).send(err);
         const mapped = results.map(r => {
@@ -863,7 +797,6 @@ app.get("/api/events", (req, res) => {
 
 // Get single event (public) - strip blob fields and map image endpoint
 app.get("/api/events/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM events WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -881,7 +814,6 @@ app.get("/api/events/:id", (req, res) => {
 
 // Create a new event with optional image upload (multipart/form-data)
 app.post("/api/events", authenticateToken, upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     try {
         console.log('--- Add Event Debug ---');
         console.log('req.body:', req.body);
@@ -929,7 +861,6 @@ app.post("/api/events", authenticateToken, upload.any(), (req, res) => {
 
 // Update an event, with optional image upload
 app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const eventId = req.params.id;
     console.log('--- Edit Event Debug ---');
     console.log('req.body:', req.body);
@@ -967,27 +898,13 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
                 console.error('Update event error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
             }
-            // Return the updated event (strip binary fields and map image_url)
-            pool.query('SELECT * FROM events WHERE id = ?', [eventId], (sErr, sResults) => {
-                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated event', error: sErr.message });
-                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Event not found after update' });
-                const ev = sResults[0];
-                const out = { ...ev };
-                delete out.image_data;
-                delete out.image_mimetype;
-                delete out.image_name;
-                if (ev.image_data && ev.image_data.length > 0) {
-                    out.image_url = `/api/events/${ev.id}/image`;
-                }
-                res.json({ success: true, message: 'Event updated successfully', data: out });
-            });
+            res.json({ success: true, message: 'Event updated successfully' });
         });
     });
 });
 
 // Serve event image from DB blob or filesystem path
 app.get('/api/events/:id/image', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600');
     const eventId = req.params.id;
     pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM events WHERE id = ?', [eventId], (err, results) => {
         if (err) {
@@ -1662,7 +1579,6 @@ app.get('/api/admin/analytics', async (req, res) => {
 
 // SERVICES CRUD
 app.get("/api/services/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM services WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1671,7 +1587,6 @@ app.get("/api/services/:id", (req, res) => {
 });
 
 app.post("/api/services", authenticateToken, (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("INSERT INTO services SET ?", req.body, (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true, id: result.insertId });
@@ -1679,20 +1594,13 @@ app.post("/api/services", authenticateToken, (req, res) => {
 });
 
 app.put("/api/services/:id", authenticateToken, (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("UPDATE services SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
-        // Return updated service
-        pool.query('SELECT * FROM services WHERE id = ?', [req.params.id], (sErr, sResults) => {
-            if (sErr) return res.status(500).send(sErr);
-            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Service not found after update' });
-            res.json({ success: true, data: sResults[0] });
-        });
+        res.json({ success: true });
     });
 });
 
 app.delete("/api/services/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM services WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -1701,7 +1609,6 @@ app.delete("/api/services/:id", authenticateToken, requireRole("superadmin"), (r
 
 // TEAM MEMBERS CRUD
 app.get("/api/team/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM team_members WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1711,8 +1618,7 @@ app.get("/api/team/:id", (req, res) => {
 
 
 // Add new team member (with optional image upload, flexible file field)
-app.post("/api/team", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
+app.post("/api/team", upload.any(), (req, res) => {
     try {
         const { name, role, bio } = req.body;
         if (!name || !role || !bio) {
@@ -1777,8 +1683,7 @@ app.post("/api/team", authenticateToken, requireRole("superadmin"), (req, res) =
 // Update team member (with optional image upload)
 
 // Update team member (with optional image upload, flexible file field)
-app.put('/api/team/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
-    res.set('Cache-Control', 'no-store');
+app.put('/api/team/:id', upload.any(), (req, res) => {
     const memberId = req.params.id;
     const { name, role, bio } = req.body;
     if (!name || !role || !bio) {
@@ -1806,40 +1711,18 @@ app.put('/api/team/:id', authenticateToken, requireAnyRole(["admin", "superadmin
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE team_members SET ${setClause} WHERE id = ?`;
         values.push(memberId);
-        pool.query(query, values, (err, result) => {
+    pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Update member error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update member', error: err.message });
             }
-
-            // ✅ CRITICAL FIX: Fetch and return the updated member data
-            pool.query('SELECT * FROM team_members WHERE id = ?', [memberId], (fetchErr, fetchResults) => {
-                if (fetchErr) {
-                    console.error('Fetch updated member error:', fetchErr);
-                    return res.json({ success: true, message: 'Member updated successfully' });
-                }
-
-                const updatedMember = fetchResults[0];
-                // Remove binary fields from response
-                const memberResponse = { ...updatedMember };
-                delete memberResponse.photo_data;
-                delete memberResponse.photo_mimetype;
-                delete memberResponse.photo_name;
-
-                // Return updated member in the expected format
-                res.json({ 
-                    success: true, 
-                    message: 'Member updated successfully',
-                    data: memberResponse
-                });
-            });
+            res.json({ success: true, message: 'Member updated successfully' });
         });
     });
 });
 
 // Delete a team member (superadmin only)
 app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM team_members WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -1848,7 +1731,6 @@ app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, 
 
 // Serve team member photo from DB blob or filesystem path
 app.get('/api/team/:id/photo', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600');
     const memberId = req.params.id;
     pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
         if (err) {
@@ -1882,7 +1764,6 @@ app.get('/api/team/:id/photo', (req, res) => {
 
 // PROJECTS CRUD
 app.get("/api/projects/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM projects WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1891,7 +1772,6 @@ app.get("/api/projects/:id", (req, res) => {
 });
 
 app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     try {
         console.log('--- Add Project Debug ---');
         console.log('req.body:', req.body);
@@ -1955,7 +1835,6 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
 
 // Update a project, with optional image upload
 app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const projectId = req.params.id;
     console.log('--- Edit Project Debug ---');
     console.log('req.body:', req.body);
@@ -1993,27 +1872,13 @@ app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
                 console.error('Update project error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update project', error: err.message });
             }
-            // Return updated project without binary image fields
-            pool.query('SELECT * FROM projects WHERE id = ?', [projectId], (sErr, sResults) => {
-                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated project', error: sErr.message });
-                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Project not found after update' });
-                const proj = sResults[0];
-                const out = { ...proj };
-                delete out.image_data;
-                delete out.image_mimetype;
-                delete out.image_name;
-                if (proj.image_data && proj.image_data.length > 0) {
-                    out.image_url = `/api/projects/${proj.id}/image`;
-                }
-                res.json({ success: true, message: 'Project updated successfully', data: out });
-            });
+            res.json({ success: true, message: 'Project updated successfully' });
         });
     });
 });
 
 // PROJECT DELETE - SUPERADMIN ONLY (This is your main requirement)
 app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const projectId = req.params.id;
     console.log("DELETE /api/projects/:id called. id:", projectId);
     console.log("req.user:", req.user);
@@ -2032,7 +1897,6 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
 
 // Serve project image from DB blob or filesystem path
 app.get('/api/projects/:id/image', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600');
     const projectId = req.params.id;
     pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
         if (err) {
@@ -2064,7 +1928,6 @@ app.get('/api/projects/:id/image', (req, res) => {
 
 // ARTICLES CRUD
 app.get("/api/articles/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -2082,7 +1945,6 @@ app.get("/api/articles/:id", (req, res) => {
 });
 
 app.post("/api/articles", authenticateToken, upload.single('article_pdf'), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     try {
         const { title, content, author_name, created_at } = req.body;
         const insertData = {
@@ -2123,7 +1985,6 @@ app.post("/api/articles", authenticateToken, upload.single('article_pdf'), (req,
 });
 
 app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     const { title, content, author_name, created_at } = req.body;
     const updateFields = {
         title,
@@ -2167,20 +2028,7 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
                 // Do not dump binary data into logs
                 return res.status(500).json({ success: false, message: 'Database error while updating article', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
             }
-            // Return updated article (strip binary fields and expose file endpoint if present)
-            pool.query('SELECT * FROM articles WHERE id = ?', [req.params.id], (sErr, sResults) => {
-                if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated article', error: sErr.message });
-                if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Article not found after update' });
-                const art = sResults[0];
-                const out = { ...art };
-                delete out.article;
-                delete out.article_mimetype;
-                delete out.article_name;
-                if (art.article && art.article.length > 0) {
-                    out.article_url = `/api/articles/${art.id}/file`;
-                }
-                res.json({ success: true, data: out });
-            });
+            res.json({ success: true });
         });
     } catch (err) {
         console.error('Unexpected error in PUT /api/articles/:id', err);
@@ -2189,7 +2037,6 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
 });
 
 app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM articles WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -2198,7 +2045,6 @@ app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (r
 
 // Serve article file (PDF or other) from DB blob or filesystem path
 app.get('/api/articles/:id/file', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600');
     const articleId = req.params.id;
     pool.query('SELECT article, article_mimetype, article_name, article_url FROM articles WHERE id = ?', [articleId], (err, results) => {
         if (err) {
@@ -2327,20 +2173,7 @@ app.put("/api/events/:id", authenticateToken, upload.single('image'), (req, res)
                     console.error('Update event error:', err);
                     return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
                 }
-                // Return the updated event (strip binary fields and map image_url)
-                pool.query('SELECT * FROM events WHERE id = ?', [eventId], (sErr, sResults) => {
-                    if (sErr) return res.status(500).json({ success: false, message: 'Failed to fetch updated event', error: sErr.message });
-                    if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Event not found after update' });
-                    const ev = sResults[0];
-                    const out = { ...ev };
-                    delete out.image_data;
-                    delete out.image_mimetype;
-                    delete out.image_name;
-                    if (ev.image_data && ev.image_data.length > 0) {
-                        out.image_url = `/api/events/${ev.id}/image`;
-                    }
-                    res.json({ success: true, message: 'Event updated successfully', data: out });
-                });
+                res.json({ success: true, message: 'Event updated successfully' });
             });
         });
     } catch (error) {
@@ -2364,7 +2197,6 @@ app.use((error, req, res, next) => {
 });
 
 app.delete("/api/events/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
-    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM events WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -2373,7 +2205,6 @@ app.delete("/api/events/:id", authenticateToken, requireRole("superadmin"), (req
 
 // JOB POSTINGS CRUD
 app.get("/api/jobs/:id", (req, res) => {
-    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM job_postings WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -2391,12 +2222,7 @@ app.post("/api/jobs", authenticateToken, (req, res) => {
 app.put("/api/jobs/:id", authenticateToken, (req, res) => {
     pool.query("UPDATE job_postings SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
-        // Return updated job posting
-        pool.query('SELECT * FROM job_postings WHERE id = ?', [req.params.id], (sErr, sResults) => {
-            if (sErr) return res.status(500).send(sErr);
-            if (!sResults || sResults.length === 0) return res.status(404).json({ error: 'Job not found after update' });
-            res.json({ success: true, data: sResults[0] });
-        });
+        res.json({ success: true });
     });
 });
 
