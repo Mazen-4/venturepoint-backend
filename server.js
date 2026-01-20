@@ -36,8 +36,6 @@ app.use((req, res, next) => {
     });
 });
 
-// Apply multer to handle multipart form data for team updates
-app.use('/api/team', upload.any());
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
@@ -87,6 +85,11 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter, // keep existing filter
 });
+
+// Apply multer to handle multipart form data for team updates
+// This must be after upload is defined
+app.use('/api/team', upload.any());
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Database configuration - use environment variables
