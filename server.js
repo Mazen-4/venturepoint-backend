@@ -712,7 +712,7 @@ app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmi
 // PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
 app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
     const advisorId = req.params.id;
-    const { name, area_of_focus, bio, is_top_advisor } = req.body;
+    const { name, area_of_focus, bio, is_top_advisor, removePhoto } = req.body;
     pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
@@ -721,14 +721,23 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
         if (area_of_focus !== undefined) updateData.area_of_focus = area_of_focus;
         if (bio !== undefined) updateData.bio = bio;
         if (is_top_advisor !== undefined && is_top_advisor !== null) updateData.is_top_advisor = is_top_advisor;
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            updateData.photo_name = file.originalname || file.filename || null;
-            updateData.photo_mimetype = file.mimetype || null;
-            updateData.photo_data = file.buffer || null;
-            updateData.photo_url = `/api/advisors/${advisorId}/photo`;
+        
+        // Handle photo removal
+        if (removePhoto === 'true') {
+            updateData.photo_name = null;
+            updateData.photo_mimetype = null;
+            updateData.photo_data = null;
+            updateData.photo_url = null;
         } else {
-            updateData.photo_url = results[0]?.photo_url || '';
+            let file = req.files && req.files.length > 0 ? req.files[0] : null;
+            if (file) {
+                updateData.photo_name = file.originalname || file.filename || null;
+                updateData.photo_mimetype = file.mimetype || null;
+                updateData.photo_data = file.buffer || null;
+                updateData.photo_url = `/api/advisors/${advisorId}/photo`;
+            } else {
+                updateData.photo_url = results[0]?.photo_url || '';
+            }
         }
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
