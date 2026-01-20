@@ -431,29 +431,44 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
     res.set('Cache-Control', 'no-store');
     const partnerId = req.params.id;
     const { name, details } = req.body;
-    pool.query('SELECT image_url FROM partners WHERE id = ?', [partnerId], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+    console.log(`[PARTNER UPDATE] Updating partner ${partnerId}`, { name: !!name, details: !!details, hasFile: !!req.files?.length });
+    
+    pool.query('SELECT image, image_data, image_mimetype FROM partners WHERE id = ?', [partnerId], (err, results) => {
+        if (err) {
+            console.error('[PARTNER UPDATE] Fetch error:', err);
+            return res.status(500).json({ error: err.message });
+        }
         if (!results || results.length === 0) return res.status(404).json({ error: 'Partner not found' });
+        
         let updateData = {};
         if (name !== undefined) updateData.name = name;
         if (details !== undefined) updateData.details = details;
         
         let file = req.files && req.files.length > 0 ? req.files[0] : null;
         if (file) {
-            updateData.image_name = file.originalname || file.filename || null;
-            updateData.image_mimetype = file.mimetype || null;
+            console.log(`[PARTNER UPDATE] New image: ${file.originalname}, size: ${file.buffer?.length} bytes`);
             updateData.image_data = file.buffer || null;
-            updateData.image_url = `/api/partners/${partnerId}/image`;
-        } else {
-            updateData.image_url = results[0]?.image_url || '';
+            updateData.image_mimetype = file.mimetype || 'image/jpeg';
+            updateData.image = null; // Clear legacy column
         }
+        
         const fields = Object.keys(updateData);
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+        
         const values = fields.map(f => updateData[f]);
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
         values.push(partnerId);
+        
+        console.log(`[PARTNER UPDATE] Query: ${query}`);
         pool.query(query, values, (err, result) => {
-            if (err) return res.status(500).json({ error: err.message });
+            if (err) {
+                console.error('[PARTNER UPDATE] Update error:', err);
+                return res.status(500).json({ error: err.message });
+            }
+            console.log(`[PARTNER UPDATE] Success for partner ${partnerId}`);
             res.json({ success: true, message: 'Partner updated successfully' });
         });
     });
