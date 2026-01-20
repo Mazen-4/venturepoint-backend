@@ -25,8 +25,19 @@ app.use(cors({
     exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Middleware to handle both JSON and multipart form data
+app.use((req, res, next) => {
+    // Skip body parsing for file upload routes - let multer handle them
+    if ((req.method === 'POST' || req.method === 'PUT') && req.headers['content-type']?.includes('multipart/form-data')) {
+        return next();
+    }
+    express.json()(req, res, () => {
+        express.urlencoded({ extended: true })(req, res, next);
+    });
+});
+
+// Apply multer to handle multipart form data for team updates
+app.use('/api/team', upload.any());
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // PDF upload and retrieval is handled via DB BLOB, not static folder or separate router
@@ -1697,7 +1708,7 @@ app.get("/api/team/:id", (req, res) => {
 
 
 // Add new team member (with optional image upload, flexible file field)
-app.post("/api/team", upload.any(), (req, res) => {
+app.post("/api/team", authenticateToken, requireRole("superadmin"), (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
         const { name, role, bio } = req.body;
@@ -1763,7 +1774,7 @@ app.post("/api/team", upload.any(), (req, res) => {
 // Update team member (with optional image upload)
 
 // Update team member (with optional image upload, flexible file field)
-app.put('/api/team/:id', upload.any(), (req, res) => {
+app.put('/api/team/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
     res.set('Cache-Control', 'no-store');
     const memberId = req.params.id;
     const { name, role, bio } = req.body;
