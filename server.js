@@ -485,7 +485,8 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                     updateFields.push('image_mimetype = ?');
                     updateValues.push(file.mimetype || 'image/jpeg');
                     // Clear legacy column if it exists
-                    updateFields.push('image = NULL');
+                    updateFields.push('image = ?');
+                    updateValues.push(null);
                     console.log('[PARTNER UPDATE] New image size:', file.buffer.length, 'bytes');
                 } else {
                     // No new image - preserve existing image from either image_data or image column
@@ -504,6 +505,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
                         updateFields.push('image_mimetype = ?');
                         updateValues.push(existing.image_mimetype || 'image/jpeg');
                     }
+                    // If no existing image, don't add any image fields to update
                 }
                 
                 if (updateFields.length === 0) {
