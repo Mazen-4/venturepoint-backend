@@ -76,59 +76,23 @@ const upload = multer({
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
-// Database configuration - use environment variables
-const DB_CONFIG = {
-    host: process.env.DATABASE_HOST || "148.72.3.185",
-    user: process.env.DATABASE_USER || "vp_DBAdmin",
-    password: process.env.DATABASE_PASSWORD || "Vp_ed#2025%1624*P@s$",
-    database: process.env.DATABASE_NAME || "venturepoint_db",
+const pool = mysql.createPool({
+    host: "148.72.3.185",
+    user: "vp_DBAdmin",
+    password: "Vp_ed#2025%1624*P@s$",
+    database: "venturepoint_db",
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0,
-    connectionTimeout: 10000, // 10 second timeout instead of infinite
-    enableKeepAlive: true,
-    keepAliveInitialDelayMs: 0
-};
-
-console.log(`📊 Database Configuration: host=${DB_CONFIG.host}, database=${DB_CONFIG.database}`);
-
-let pool = mysql.createPool(DB_CONFIG);
-let dbConnected = false;
-let dbRetries = 0;
-const maxRetries = 5;
-
-// Function to test database connection with retries
-const testDatabaseConnection = () => {
-    pool.getConnection((err, connection) => {
-        if (err) {
-            dbRetries++;
-            console.error(`❌ DB connection attempt ${dbRetries}/${maxRetries} failed:`, err.code || err.message);
-            
-            if (dbRetries < maxRetries) {
-                // Retry with exponential backoff
-                const delay = Math.pow(2, dbRetries) * 1000; // 2s, 4s, 8s, 16s, 32s
-                console.log(`⏳ Retrying database connection in ${delay}ms...`);
-                setTimeout(testDatabaseConnection, delay);
-            } else {
-                console.error(`❌ Failed to connect to database after ${maxRetries} attempts`);
-                console.error(`⚠️  CRITICAL: Database is unreachable at ${DB_CONFIG.host}`);
-                console.error(`⚠️  Possible causes:`);
-                console.error(`   1. Database server is offline`);
-                console.error(`   2. Database host is on local network (Render cannot reach local IPs)`);
-                console.error(`   3. Render IP is not whitelisted in database firewall`);
-                console.error(`   4. Incorrect credentials in environment variables`);
-                console.error(`⚠️  Solution: Move database to cloud (AWS RDS, DigitalOcean, PlanetScale)`);
-            }
-            return;
-        }
-        dbConnected = true;
-        console.log("✅ Connected to MySQL database (pool)");
-        connection.release();
-    });
-};
-
-// Initial connection test
-testDatabaseConnection();
+    queueLimit: 0
+});
+pool.getConnection((err, connection) => {
+    if (err) {
+        console.error("❌ DB pool connection failed: ", err);
+        return;
+    }
+    console.log("✅ Connected to MySQL database (pool)");
+    connection.release();
+});
 
 // Ensure required columns exist in articles table (add blob & metadata columns if missing)
 const ensureArticleColumns = () => {
@@ -330,155 +294,114 @@ app.get("/api/partners/:id", (req, res) => {
 });
 
 // Add a new partner (admin or superadmin, with image upload)
-app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
     try {
         const { name, description, details, website, ...otherFields } = req.body;
         if (!name) return res.status(400).json({ error: "Partner name required" });
         let insertData = { name, website, ...otherFields };
         // Handle both 'description' and 'details' field names (frontend uses 'details')
         insertData.description = description || details || '';
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            if (!file.buffer) {
-                return res.status(400).json({ error: 'Image file is empty or corrupted' });
-            }
-            insertData.image_data = file.buffer;
-            insertData.image_mimetype = file.mimetype || 'image/jpeg';
-            // Don't set image = null in INSERT, just leave it NULL in database
+        if (req.file) {
+            insertData.image_data = req.file.buffer || null;
+            insertData.image_mimetype = req.file.mimetype || null;
+            insertData.image = null; // Clear legacy column
         }
-        const fields = Object.keys(insertData).filter(f => insertData[f] !== undefined);
+        const fields = Object.keys(insertData);
         const placeholders = fields.map(() => '?').join(', ');
-        const values = fields.map(f => insertData[f]);
         const query = `INSERT INTO partners (${fields.join(', ')}) VALUES (${placeholders})`;
-        console.log('[PARTNER CREATE] Query:', query);
-        console.log('[PARTNER CREATE] Fields:', fields);
-        pool.query(query, values, (err, result) => {
+        pool.query(query, Object.values(insertData), (err, result) => {
             if (err) {
-                console.error('[PARTNER CREATE] Database error:', err);
                 if (err.code === 'ER_DUP_ENTRY') {
                     return res.status(409).json({ error: "Partner already exists" });
                 }
-                return res.status(500).json({ error: 'Database error: ' + err.message });
+                return res.status(500).send(err);
             }
             const partnerId = result.insertId;
             // Respond with created partner metadata; indicate has_image if a file was uploaded
-            const responsePartner = { id: partnerId, ...insertData, has_image: !!file };
+            const responsePartner = { id: partnerId, ...insertData, has_image: !!req.file };
             res.status(201).json({ success: true, id: partnerId, partner: responsePartner });
         });
     } catch (error) {
-        console.error('[PARTNER CREATE] Exception:', error);
-        res.status(500).json({ error: 'Server error: ' + error.message });
+        res.status(500).json({ error: error.message });
     }
 });
 
 // Update a partner (admin/superadmin, with image upload)
-app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
-    try {
-        const partnerId = req.params.id;
-        const { name, description, details, website } = req.body;
-        console.log(`[PARTNER UPDATE] Request to update partner ${partnerId}`);
-        console.log('[PARTNER UPDATE] req.body keys:', Object.keys(req.body));
-        console.log('[PARTNER UPDATE] req.body sample:', {
-            name: req.body.name,
-            description: req.body.description,
-            details: req.body.details,
-            website: req.body.website
+app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.single('image'), (req, res) => {
+    const partnerId = req.params.id;
+    const { name, description, details, website } = req.body;
+    console.log(`[PARTNER UPDATE] Request to update partner ${partnerId}`);
+    console.log('[PARTNER UPDATE] req.body keys:', Object.keys(req.body));
+    console.log('[PARTNER UPDATE] req.body sample:', {
+        name: req.body.name,
+        description: req.body.description,
+        details: req.body.details,
+        website: req.body.website
+    });
+    console.log('[PARTNER UPDATE] req.file:', req.file ? { originalname: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size } : null);
+
+    // Get old image data if no new image is uploaded
+        // Include the legacy `image` column so existing images stored in that column are preserved
+        // NOTE: some databases may not have an `image_url` column; do NOT select it here to avoid ER_BAD_FIELD_ERROR
+        pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {        if (err) {
+            console.error('Error fetching partner for update:', err);
+            return res.status(500).json({ error: err.message });
+        }
+        if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
+        
+        const existing = results[0];
+        let updateData = {};
+        
+        if (name !== undefined) updateData.name = name;
+        // Handle both 'description' and 'details' field names (frontend uses 'details')
+        if (description !== undefined) updateData.details = description;
+        if (details !== undefined) updateData.details = details;
+        if (website !== undefined) updateData.website = website;
+        
+        if (req.file) {
+            // New image uploaded -> write into the new blob column and clear legacy column
+            updateData.image_data = req.file.buffer || null;
+            updateData.image_mimetype = req.file.mimetype || null;
+            updateData.image = null; // Clear legacy column so we don't have duplicate storage
+        } else {
+            // No new image - preserve existing image from either image_data or image column
+            const hasImageData = existing.image_data && existing.image_data.length > 0;
+            const hasImage = existing.image && existing.image.length > 0;
+            
+            if (hasImageData) {
+                updateData.image_data = existing.image_data;
+                updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
+            } else if (hasImage) {
+                // copy legacy `image` into `image_data` so the rest of the app uses a single column
+                updateData.image_data = existing.image;
+                updateData.image_mimetype = existing.image_mimetype || 'image/jpeg';
+            }
+        }
+        const fields = Object.keys(updateData);
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No update fields provided' });
+        }
+        const values = fields.map(f => updateData[f]);
+        const setClause = fields.map(f => `${f} = ?`).join(', ');
+        const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
+        values.push(partnerId);
+
+        console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, fields);
+        console.log('[PARTNER UPDATE] Generated query:', query);
+        try {
+            console.log('[PARTNER UPDATE] Values preview:', values.map(v => (Buffer.isBuffer(v) ? `<Buffer ${v.length} bytes>` : (typeof v === 'string' && v.length > 100 ? v.slice(0, 100) + '...' : v))));
+        } catch (logErr) {
+            console.error('Error while logging update values preview:', logErr);
+        }
+
+        pool.query(query, values, (err, result) => {
+            if (err) {
+                console.error('Error updating partner:', err);
+                return res.status(500).json({ error: err.message, stack: err.stack });
+            }
+            res.json({ success: true, message: 'Partner updated successfully' });
         });
-        console.log('[PARTNER UPDATE] req.files:', req.files ? `${req.files.length} files` : 'no files');
-
-        // Get old image data if no new image is uploaded
-            // Include the legacy `image` column so existing images stored in that column are preserved
-            // NOTE: some databases may not have an `image_url` column; do NOT select it here to avoid ER_BAD_FIELD_ERROR
-            pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
-                if (err) {
-                    console.error('Error fetching partner for update:', err);
-                    return res.status(500).json({ error: 'Failed to fetch partner: ' + err.message });
-                }
-                if (!results || results.length === 0) return res.status(404).json({ error: "Partner not found" });
-                
-                const existing = results[0];
-                let updateFields = [];
-                let updateValues = [];
-                
-                if (name !== undefined && name !== '') {
-                    updateFields.push('name = ?');
-                    updateValues.push(name);
-                }
-                // Handle both 'description' and 'details' field names (frontend uses 'details')
-                if (description !== undefined && description !== '') {
-                    updateFields.push('description = ?');
-                    updateValues.push(description);
-                }
-                if (details !== undefined && details !== '') {
-                    updateFields.push('description = ?');
-                    updateValues.push(details);
-                }
-                if (website !== undefined && website !== '') {
-                    updateFields.push('website = ?');
-                    updateValues.push(website);
-                }
-                
-                let file = req.files && req.files.length > 0 ? req.files[0] : null;
-                if (file) {
-                    // New image uploaded -> write into the new blob column
-                    if (!file.buffer) {
-                        return res.status(400).json({ error: 'Image file is empty or corrupted' });
-                    }
-                    updateFields.push('image_data = ?');
-                    updateValues.push(file.buffer);
-                    updateFields.push('image_mimetype = ?');
-                    updateValues.push(file.mimetype || 'image/jpeg');
-                    // Clear legacy column if it exists
-                    updateFields.push('image = NULL');
-                    console.log('[PARTNER UPDATE] New image size:', file.buffer.length, 'bytes');
-                } else {
-                    // No new image - preserve existing image from either image_data or image column
-                    const hasImageData = existing.image_data && existing.image_data.length > 0;
-                    const hasImage = existing.image && existing.image.length > 0;
-                    
-                    if (hasImageData) {
-                        updateFields.push('image_data = ?');
-                        updateValues.push(existing.image_data);
-                        updateFields.push('image_mimetype = ?');
-                        updateValues.push(existing.image_mimetype || 'image/jpeg');
-                    } else if (hasImage) {
-                        // copy legacy `image` into `image_data` so the rest of the app uses a single column
-                        updateFields.push('image_data = ?');
-                        updateValues.push(existing.image);
-                        updateFields.push('image_mimetype = ?');
-                        updateValues.push(existing.image_mimetype || 'image/jpeg');
-                    }
-                }
-                
-                if (updateFields.length === 0) {
-                    return res.status(400).json({ error: 'No update fields provided' });
-                }
-                
-                updateValues.push(partnerId);
-                const setClause = updateFields.join(', ');
-                const query = `UPDATE partners SET ${setClause} WHERE id = ?`;
-
-                console.log(`[PARTNER UPDATE] Updating partner ${partnerId}, fields:`, updateFields);
-                console.log('[PARTNER UPDATE] Generated query:', query);
-                try {
-                    console.log('[PARTNER UPDATE] Values preview:', updateValues.map(v => (Buffer.isBuffer(v) ? `<Buffer ${v.length} bytes>` : (typeof v === 'string' && v.length > 100 ? v.slice(0, 100) + '...' : v))));
-                } catch (logErr) {
-                    console.error('Error while logging update values preview:', logErr);
-                }
-
-                pool.query(query, updateValues, (err, result) => {
-                    if (err) {
-                        console.error('Error updating partner:', err);
-                        return res.status(500).json({ error: 'Database error: ' + err.message });
-                    }
-                    console.log('[PARTNER UPDATE] Successfully updated partner', partnerId);
-                    res.json({ success: true, message: 'Partner updated successfully' });
-                });
-            });
-    } catch (error) {
-        console.error('[PARTNER UPDATE] Exception:', error);
-        res.status(500).json({ error: 'Server error: ' + error.message });
-    }
+    });
 });
 
 // Serve partner image from DB blob (from either image_data or image column)
