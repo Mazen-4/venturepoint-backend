@@ -797,7 +797,8 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
     console.log('--- Edit Event Debug ---');
     console.log('req.body:', req.body);
     console.log('req.files:', req.files);
-    const { title, description, event_date } = req.body;
+    console.log('remove_image flag:', req.body.remove_image);
+    const { title, description, event_date, remove_image } = req.body;
     // Get old image_url if no new image is uploaded
     pool.query('SELECT image_url FROM events WHERE id = ?', [eventId], (err, results) => {
         if (err) {
@@ -809,27 +810,46 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
         if (title !== undefined) updateData.title = title;
         if (description !== undefined) updateData.description = description;
         if (event_date !== undefined) updateData.event_date = event_date;
-        let file = req.files && req.files.length > 0 ? req.files[0] : null;
-        if (file) {
-            updateData.image_name = file.originalname || file.filename || null;
-            updateData.image_mimetype = file.mimetype || null;
-            updateData.image_data = file.buffer || null;
-            updateData.image_url = `/api/events/${eventId}/image`;
+        
+        // Check if user requested to remove the image
+        const shouldRemoveImage = remove_image === '1' || remove_image === 'true' || remove_image === 'yes';
+        console.log('shouldRemoveImage:', shouldRemoveImage);
+        
+        if (shouldRemoveImage) {
+            // Clear all image fields
+            updateData.image_name = null;
+            updateData.image_mimetype = null;
+            updateData.image_data = null;
+            updateData.image_url = '';
+            console.log('Removing image - setting all image fields to null/empty');
         } else {
-            updateData.image_url = results[0]?.image_url || '';
+            // Handle new image upload or keep existing
+            let file = req.files && req.files.length > 0 ? req.files[0] : null;
+            if (file) {
+                updateData.image_name = file.originalname || file.filename || null;
+                updateData.image_mimetype = file.mimetype || null;
+                updateData.image_data = file.buffer || null;
+                updateData.image_url = `/api/events/${eventId}/image`;
+                console.log('New image uploaded');
+            } else {
+                updateData.image_url = results[0]?.image_url || '';
+                console.log('Keeping existing image');
+            }
         }
+        
         const fields = Object.keys(updateData);
         const values = fields.map(f => updateData[f]);
         const setClause = fields.map(f => `${f} = ?`).join(', ');
         const query = `UPDATE events SET ${setClause} WHERE id = ?`;
         values.push(eventId);
         console.log('Update query:', query);
-        console.log('Update values:', values);
+        console.log('Update values (sanitized):', fields.map((f, i) => ({ field: f, valueExists: values[i] !== null && values[i] !== undefined })));
         pool.query(query, values, (err, result) => {
             if (err) {
                 console.error('Update event error:', err);
                 return res.status(500).json({ success: false, message: 'Failed to update event', error: err.message });
             }
+            console.log('Event updated successfully');
             res.json({ success: true, message: 'Event updated successfully' });
         });
     });
