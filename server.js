@@ -307,6 +307,7 @@ app.get('/image/:id', (req, res) => {
 
 // Get all partners (public)
 app.get("/api/partners", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     try {
         pool.query(`
             SELECT id, name, details, image, image_data, image_mimetype
@@ -359,6 +360,7 @@ app.get("/api/partners", (req, res) => {
 
 // Get a single partner by ID (public)
 app.get("/api/partners/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     // Explicitly exclude ALL binary/blob columns
     pool.query("SELECT `id`, `name`, `website`, `email`, `phone`, `country`, `start_year`, `created_at`, `updated_at`, `image_url` FROM `partners` WHERE `id` = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
@@ -383,6 +385,7 @@ app.get("/api/partners/:id", (req, res) => {
 
 // Add a new partner (admin or superadmin, with image upload)
 app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const { name, description, details, website, ...otherFields } = req.body;
         if (!name) return res.status(400).json({ error: "Partner name required" });
@@ -425,6 +428,7 @@ app.post("/api/partners", authenticateToken, requireAnyRole(["admin", "superadmi
 
 // Update a partner (admin/superadmin, with image upload)
 app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const partnerId = req.params.id;
         const { name, description, details, website } = req.body;
@@ -535,6 +539,7 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
 
 // Serve partner image from DB blob (from either image_data or image column)
 app.get('/api/partners/:id/image', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600');
     const partnerId = req.params.id;
     pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
         if (err) {
@@ -573,6 +578,7 @@ app.get('/api/partners/:id/image', (req, res) => {
 
 // Delete a partner (superadmin only)
 app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM partners WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Partner not found" });
@@ -586,6 +592,7 @@ app.delete("/api/partners/:id", authenticateToken, requireRole("superadmin"), (r
 // ===== AUTHORS CRUD =====
 // Get all authors (public)
 app.get("/api/authors", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM authors", (err, results) => {
         if (err) return res.status(500).send(err);
         res.json({ data: results });
@@ -594,6 +601,8 @@ app.get("/api/authors", (req, res) => {
 
 // GET /api/advisors - Fetch all advisors
 app.get('/api/advisors', (req, res) => {
+    // Prevent aggressive caching of dynamic advisor list data
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     console.log('Fetching advisors from database...');
     const query = `
         SELECT *
@@ -634,6 +643,8 @@ app.get('/api/advisors', (req, res) => {
 
 // GET /api/advisors/:id - Fetch a specific advisor by ID
 app.get('/api/advisors/:id', (req, res) => {
+    // Prevent aggressive caching of dynamic advisor data
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     const advisorId = req.params.id;
     console.log(`Fetching advisor with ID: ${advisorId}`);
     const query = `
@@ -667,6 +678,8 @@ app.get('/api/advisors/:id', (req, res) => {
 
 // POST /api/advisors - Create a new advisor (admin/superadmin, with image upload)
 app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    // Prevent caching of POST responses with dynamic content
+    res.set('Cache-Control', 'no-store');
     try {
         const { name, area_of_focus, bio, is_top_advisor } = req.body;
         if (!name || !area_of_focus || !bio) {
@@ -711,6 +724,8 @@ app.post('/api/advisors', authenticateToken, requireAnyRole(["admin", "superadmi
 
 // PUT /api/advisors/:id - Update an advisor (admin/superadmin, with image upload)
 app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "superadmin"]), upload.any(), (req, res) => {
+    // Prevent caching of PUT responses with dynamic content
+    res.set('Cache-Control', 'no-store');
     const advisorId = req.params.id;
     const { name, area_of_focus, bio, is_top_advisor, removePhoto } = req.body;
     pool.query('SELECT photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
@@ -753,6 +768,8 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
 
 // Serve advisor photo from DB blob or filesystem path
 app.get('/api/advisors/:id/photo', (req, res) => {
+    // Allow moderate caching for photo assets (they change infrequently)
+    res.set('Cache-Control', 'public, max-age=3600');
     const advisorId = req.params.id;
     pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
         if (err) {
@@ -784,6 +801,8 @@ app.get('/api/advisors/:id/photo', (req, res) => {
 
 // DELETE /api/advisors/:id - Delete an advisor (superadmin only)
 app.delete('/api/advisors/:id', authenticateToken, requireRole('superadmin'), (req, res) => {
+    // Prevent caching of DELETE responses
+    res.set('Cache-Control', 'no-store');
     pool.query('DELETE FROM advisors WHERE id = ?', [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: 'Advisor not found' });
@@ -793,6 +812,7 @@ app.delete('/api/advisors/:id', authenticateToken, requireRole('superadmin'), (r
 
 // Get a single author by ID (public)
 app.get("/api/authors/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM authors WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (!results || results.length === 0) return res.status(404).json({ error: "Author not found" });
@@ -802,6 +822,7 @@ app.get("/api/authors/:id", (req, res) => {
 
 // Add a new author (admin or superadmin)
 app.post("/api/authors", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Author name required" });
     pool.query("INSERT INTO authors (name) VALUES (?)", [name], (err, result) => {
@@ -817,6 +838,7 @@ app.post("/api/authors", authenticateToken, requireAnyRole(["admin", "superadmin
 
 // Update an author (admin or superadmin)
 app.put("/api/authors/:id", authenticateToken, requireAnyRole(["admin", "superadmin"]), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Author name required" });
     pool.query("UPDATE authors SET name = ? WHERE id = ?", [name, req.params.id], (err, result) => {
@@ -828,6 +850,7 @@ app.put("/api/authors/:id", authenticateToken, requireAnyRole(["admin", "superad
 
 // Delete an author (superadmin only)
 app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM authors WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         if (result.affectedRows === 0) return res.status(404).json({ error: "Author not found" });
@@ -839,6 +862,7 @@ app.delete("/api/authors/:id", authenticateToken, requireRole("superadmin"), (re
 // EVENTS CRUD - consolidated handlers that store images as DB blobs
 // Get all events (public) - map blob rows to image endpoint and strip binary fields
 app.get("/api/events", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM events", (err, results) => {
         if (err) return res.status(500).send(err);
         const mapped = results.map(r => {
@@ -858,6 +882,7 @@ app.get("/api/events", (req, res) => {
 
 // Get single event (public) - strip blob fields and map image endpoint
 app.get("/api/events/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM events WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -875,6 +900,7 @@ app.get("/api/events/:id", (req, res) => {
 
 // Create a new event with optional image upload (multipart/form-data)
 app.post("/api/events", authenticateToken, upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         console.log('--- Add Event Debug ---');
         console.log('req.body:', req.body);
@@ -922,6 +948,7 @@ app.post("/api/events", authenticateToken, upload.any(), (req, res) => {
 
 // Update an event, with optional image upload
 app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const eventId = req.params.id;
     console.log('--- Edit Event Debug ---');
     console.log('req.body:', req.body);
@@ -966,6 +993,7 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
 
 // Serve event image from DB blob or filesystem path
 app.get('/api/events/:id/image', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600');
     const eventId = req.params.id;
     pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM events WHERE id = ?', [eventId], (err, results) => {
         if (err) {
@@ -1640,6 +1668,7 @@ app.get('/api/admin/analytics', async (req, res) => {
 
 // SERVICES CRUD
 app.get("/api/services/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM services WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1648,6 +1677,7 @@ app.get("/api/services/:id", (req, res) => {
 });
 
 app.post("/api/services", authenticateToken, (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("INSERT INTO services SET ?", req.body, (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true, id: result.insertId });
@@ -1655,6 +1685,7 @@ app.post("/api/services", authenticateToken, (req, res) => {
 });
 
 app.put("/api/services/:id", authenticateToken, (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("UPDATE services SET ? WHERE id = ?", [req.body, req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -1662,6 +1693,7 @@ app.put("/api/services/:id", authenticateToken, (req, res) => {
 });
 
 app.delete("/api/services/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM services WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -1670,6 +1702,7 @@ app.delete("/api/services/:id", authenticateToken, requireRole("superadmin"), (r
 
 // TEAM MEMBERS CRUD
 app.get("/api/team/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM team_members WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1680,6 +1713,7 @@ app.get("/api/team/:id", (req, res) => {
 
 // Add new team member (with optional image upload, flexible file field)
 app.post("/api/team", upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const { name, role, bio } = req.body;
         if (!name || !role || !bio) {
@@ -1745,6 +1779,7 @@ app.post("/api/team", upload.any(), (req, res) => {
 
 // Update team member (with optional image upload, flexible file field)
 app.put('/api/team/:id', upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const memberId = req.params.id;
     const { name, role, bio } = req.body;
     if (!name || !role || !bio) {
@@ -1784,6 +1819,7 @@ app.put('/api/team/:id', upload.any(), (req, res) => {
 
 // Delete a team member (superadmin only)
 app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM team_members WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -1792,6 +1828,7 @@ app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, 
 
 // Serve team member photo from DB blob or filesystem path
 app.get('/api/team/:id/photo', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600');
     const memberId = req.params.id;
     pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
         if (err) {
@@ -1825,6 +1862,7 @@ app.get('/api/team/:id/photo', (req, res) => {
 
 // PROJECTS CRUD
 app.get("/api/projects/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM projects WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1833,6 +1871,7 @@ app.get("/api/projects/:id", (req, res) => {
 });
 
 app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         console.log('--- Add Project Debug ---');
         console.log('req.body:', req.body);
@@ -1896,6 +1935,7 @@ app.post("/api/projects", authenticateToken, upload.any(), (req, res) => {
 
 // Update a project, with optional image upload
 app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const projectId = req.params.id;
     console.log('--- Edit Project Debug ---');
     console.log('req.body:', req.body);
@@ -1940,6 +1980,7 @@ app.put("/api/projects/:id", authenticateToken, upload.any(), (req, res) => {
 
 // PROJECT DELETE - SUPERADMIN ONLY (This is your main requirement)
 app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const projectId = req.params.id;
     console.log("DELETE /api/projects/:id called. id:", projectId);
     console.log("req.user:", req.user);
@@ -1958,6 +1999,7 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
 
 // Serve project image from DB blob or filesystem path
 app.get('/api/projects/:id/image', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600');
     const projectId = req.params.id;
     pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
         if (err) {
@@ -1989,6 +2031,7 @@ app.get('/api/projects/:id/image', (req, res) => {
 
 // ARTICLES CRUD
 app.get("/api/articles/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
@@ -2006,6 +2049,7 @@ app.get("/api/articles/:id", (req, res) => {
 });
 
 app.post("/api/articles", authenticateToken, upload.single('article_pdf'), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const { title, content, author_name, created_at } = req.body;
         const insertData = {
@@ -2046,6 +2090,7 @@ app.post("/api/articles", authenticateToken, upload.single('article_pdf'), (req,
 });
 
 app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const { title, content, author_name, created_at } = req.body;
     const updateFields = {
         title,
@@ -2098,6 +2143,7 @@ app.put("/api/articles/:id", authenticateToken, upload.single('article_pdf'), (r
 });
 
 app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM articles WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -2106,6 +2152,7 @@ app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (r
 
 // Serve article file (PDF or other) from DB blob or filesystem path
 app.get('/api/articles/:id/file', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600');
     const articleId = req.params.id;
     pool.query('SELECT article, article_mimetype, article_name, article_url FROM articles WHERE id = ?', [articleId], (err, results) => {
         if (err) {
@@ -2258,6 +2305,7 @@ app.use((error, req, res, next) => {
 });
 
 app.delete("/api/events/:id", authenticateToken, requireRole("superadmin"), (req, res) => {
+    res.set('Cache-Control', 'no-store');
     pool.query("DELETE FROM events WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
@@ -2266,6 +2314,7 @@ app.delete("/api/events/:id", authenticateToken, requireRole("superadmin"), (req
 
 // JOB POSTINGS CRUD
 app.get("/api/jobs/:id", (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     pool.query("SELECT * FROM job_postings WHERE id = ?", [req.params.id], (err, results) => {
         if (err) return res.status(500).send(err);
         if (results.length === 0) return res.status(404).json({ error: "Not found" });
