@@ -1332,7 +1332,7 @@ app.post("/api/contact", (req, res) => {
 
 // Mark contact message as read
 app.post("/api/contact/:id/read", authenticateToken, (req, res) => {
-    pool.query("UPDATE contact_messages SET read = 1 WHERE id = ?", [req.params.id], (err, result) => {
+    pool.query("UPDATE contact_messages SET `read` = 1 WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
     });
@@ -1340,7 +1340,7 @@ app.post("/api/contact/:id/read", authenticateToken, (req, res) => {
 
 // Mark contact message as unread
 app.post("/api/contact/:id/unread", authenticateToken, (req, res) => {
-    pool.query("UPDATE contact_messages SET read = 0 WHERE id = ?", [req.params.id], (err, result) => {
+    pool.query("UPDATE contact_messages SET `read` = 0 WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ success: true });
     });
