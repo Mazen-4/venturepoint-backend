@@ -82,8 +82,10 @@ const pool = mysql.createPool({
     password: "Vp_ed#2025%1624*P@s$",
     database: "venturepoint_db",
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
+    connectionLimit: 30,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelayMs: 0
 });
 pool.getConnection((err, connection) => {
     if (err) {
@@ -407,38 +409,49 @@ app.put("/api/partners/:id", authenticateToken, requireAnyRole(["admin", "supera
 // Serve partner image from DB blob (from either image_data or image column)
 app.get('/api/partners/:id/image', (req, res) => {
     const partnerId = req.params.id;
-    pool.query('SELECT image_data, image_mimetype, image FROM partners WHERE id = ?', [partnerId], (err, results) => {
+    const query = 'SELECT image_data, image_mimetype, image FROM partners WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching partner image:', err);
+            console.error('Error getting connection for partner image:', err);
             return res.status(500).json({ error: 'Failed to load image' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Partner not found' });
         
-        const r = results[0];
-        let imageData = null;
-        
-        // Try image_data first (newer), fall back to image (legacy)
-        if (r.image_data && r.image_data.length > 0) {
-            imageData = r.image_data;
-        } else if (r.image && r.image.length > 0) {
-            imageData = r.image;
-        }
-        
-        if (!imageData) {
-            console.log(`[PARTNER IMAGE] No image found for partner ${partnerId}`);
-            return res.status(404).json({ error: 'No image found' });
-        }
-        
-        // Ensure we're working with a proper buffer
-        const buf = Buffer.isBuffer(imageData) ? imageData : Buffer.from(imageData);
-        const mime = r.image_mimetype || 'image/jpeg';
-        
-        console.log(`[PARTNER IMAGE] Serving image for partner ${partnerId}, size: ${buf.length}, mimetype: ${mime}`);
-        
-        res.setHeader('Content-Type', mime);
-        res.setHeader('Content-Length', buf.length);
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        res.send(buf);
+        connection.query(query, [partnerId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching partner image:', err);
+                return res.status(500).json({ error: 'Failed to load image' });
+            }
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Partner not found' });
+            }
+            
+            const r = results[0];
+            let imageData = null;
+            
+            if (r.image_data && r.image_data.length > 0) {
+                imageData = r.image_data;
+            } else if (r.image && r.image.length > 0) {
+                imageData = r.image;
+            }
+            
+            if (!imageData) {
+                console.log(`[PARTNER IMAGE] No image found for partner ${partnerId}`);
+                return res.status(404).json({ error: 'No image found' });
+            }
+            
+            const buf = Buffer.isBuffer(imageData) ? imageData : Buffer.from(imageData);
+            const mime = r.image_mimetype || 'image/jpeg';
+            
+            console.log(`[PARTNER IMAGE] Serving image for partner ${partnerId}, size: ${buf.length}, mimetype: ${mime}`);
+            
+            res.setHeader('Content-Type', mime);
+            res.setHeader('Content-Length', buf.length);
+            res.setHeader('Cache-Control', 'public, max-age=3600');
+            res.send(buf);
+        });
     });
 });
 
@@ -625,31 +638,46 @@ app.put('/api/advisors/:id', authenticateToken, requireAnyRole(["admin", "supera
 // Serve advisor photo from DB blob or filesystem path
 app.get('/api/advisors/:id/photo', (req, res) => {
     const advisorId = req.params.id;
-    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM advisors WHERE id = ?', [advisorId], (err, results) => {
+    const query = 'SELECT photo_name, photo_mimetype, photo_data, photo_url FROM advisors WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching advisor photo:', err);
+            console.error('Error getting connection for advisor photo:', err);
             return res.status(500).json({ error: 'Failed to load photo' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Advisor not found' });
-        const r = results[0];
-        const hasBlob = r.photo_data && r.photo_data.length > 0;
-        console.log(`[ADVISOR PHOTO] request for ${advisorId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
-            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        if (r.photo_url && r.photo_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.photo_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
-        }
-        return res.status(404).json({ error: 'Photo not found' });
+        
+        connection.query(query, [advisorId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching advisor photo:', err);
+                return res.status(500).json({ error: 'Failed to load photo' });
+            }
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Advisor not found' });
+            }
+            
+            const r = results[0];
+            const hasBlob = r.photo_data && r.photo_data.length > 0;
+            console.log(`[ADVISOR PHOTO] request for ${advisorId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
+            
+            if (hasBlob) {
+                const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
+                res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
+                res.setHeader('Content-Length', buf.length);
+                return res.send(buf);
+            }
+            if (r.photo_url && r.photo_url.startsWith('/images/')) {
+                const filePath = path.join(__dirname, r.photo_url);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('Failed to send file fallback:', sendErr);
+                        res.status(500).end();
+                    }
+                });
+            }
+            return res.status(404).json({ error: 'Photo not found' });
+        });
     });
 });
 
@@ -858,31 +886,46 @@ app.put("/api/events/:id", authenticateToken, upload.any(), (req, res) => {
 // Serve event image from DB blob or filesystem path
 app.get('/api/events/:id/image', (req, res) => {
     const eventId = req.params.id;
-    pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM events WHERE id = ?', [eventId], (err, results) => {
+    const query = 'SELECT image_name, image_mimetype, image_data, image_url FROM events WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching event image:', err);
+            console.error('Error getting connection for event image:', err);
             return res.status(500).json({ error: 'Failed to load image' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Event not found' });
-        const r = results[0];
-        const hasBlob = r.image_data && r.image_data.length > 0;
-        console.log(`[EVENT IMAGE] request for event ${eventId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
-            res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        if (r.image_url && r.image_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.image_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
-        }
-        return res.status(404).json({ error: 'Image not found' });
+        
+        connection.query(query, [eventId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching event image:', err);
+                return res.status(500).json({ error: 'Failed to load image' });
+            }
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Event not found' });
+            }
+            
+            const r = results[0];
+            const hasBlob = r.image_data && r.image_data.length > 0;
+            console.log(`[EVENT IMAGE] request for event ${eventId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
+            
+            if (hasBlob) {
+                const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
+                res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
+                res.setHeader('Content-Length', buf.length);
+                return res.send(buf);
+            }
+            if (r.image_url && r.image_url.startsWith('/images/')) {
+                const filePath = path.join(__dirname, r.image_url);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('Failed to send file fallback:', sendErr);
+                        res.status(500).end();
+                    }
+                });
+            }
+            return res.status(404).json({ error: 'Image not found' });
+        });
     });
 });
 
@@ -952,6 +995,36 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString()
+  });
+});
+
+// Database connection pool status endpoint
+app.get('/api/health/db-pool', (req, res) => {
+  pool.getConnection((err, connection) => {
+    if (err) {
+      return res.status(500).json({
+        status: 'ERROR',
+        message: 'Cannot get connection from pool',
+        error: err.message,
+        pool_config: {
+          connectionLimit: pool.config.connectionLimit,
+          waitForConnections: pool.config.waitForConnections
+        }
+      });
+    }
+    
+    connection.release();
+    
+    res.json({
+      status: 'OK',
+      message: 'Database connection pool is healthy',
+      pool_config: {
+        connectionLimit: pool.config.connectionLimit,
+        waitForConnections: pool.config.waitForConnections,
+        enableKeepAlive: pool.config.enableKeepAlive
+      },
+      timestamp: new Date().toISOString()
+    });
   });
 });
 
@@ -1684,33 +1757,45 @@ app.delete("/api/team/:id", authenticateToken, requireRole("superadmin"), (req, 
 // Serve team member photo from DB blob or filesystem path
 app.get('/api/team/:id/photo', (req, res) => {
     const memberId = req.params.id;
-    pool.query('SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?', [memberId], (err, results) => {
+    const query = 'SELECT photo_name, photo_mimetype, photo_data, photo_url FROM team_members WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching member photo:', err);
+            console.error('Error getting connection for team photo:', err);
             return res.status(500).json({ error: 'Failed to load photo' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Member not found' });
-        const r = results[0];
-        const hasBlob = r.photo_data && r.photo_data.length > 0;
-        console.log(`[PHOTO] request for member ${memberId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
-            console.log(`[PHOTO] sending buffer for member ${memberId}, length=${buf.length}`);
-            res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        // Fallback to filesystem path if exists
-        if (r.photo_url && r.photo_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.photo_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
-        }
-        return res.status(404).json({ error: 'Photo not found' });
+        
+        connection.query(query, [memberId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching member photo:', err);
+                return res.status(500).json({ error: 'Failed to load photo' });
+            }
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Member not found' });
+            }
+            
+            const r = results[0];
+            const hasBlob = r.photo_data && r.photo_data.length > 0;
+            console.log(`[PHOTO] request for member ${memberId} - hasBlob=${!!hasBlob} mimetype=${r.photo_mimetype} url=${r.photo_url}`);\n            
+            if (hasBlob) {
+                const buf = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data);
+                console.log(`[PHOTO] sending buffer for member ${memberId}, length=${buf.length}`);\n                res.setHeader('Content-Type', r.photo_mimetype || 'image/jpeg');
+                res.setHeader('Content-Length', buf.length);
+                return res.send(buf);
+            }
+            if (r.photo_url && r.photo_url.startsWith('/images/')) {
+                const filePath = path.join(__dirname, r.photo_url);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('Failed to send file fallback:', sendErr);
+                        res.status(500).end();
+                    }
+                });
+            }
+            return res.status(404).json({ error: 'Photo not found' });
+        });
     });
 });
 
@@ -1850,31 +1935,46 @@ app.delete("/api/projects/:id", authenticateToken, requireRole("superadmin"), (r
 // Serve project image from DB blob or filesystem path
 app.get('/api/projects/:id/image', (req, res) => {
     const projectId = req.params.id;
-    pool.query('SELECT image_name, image_mimetype, image_data, image_url FROM projects WHERE id = ?', [projectId], (err, results) => {
+    const query = 'SELECT image_name, image_mimetype, image_data, image_url FROM projects WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching project image:', err);
+            console.error('Error getting connection for project image:', err);
             return res.status(500).json({ error: 'Failed to load image' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Project not found' });
-        const r = results[0];
-        const hasBlob = r.image_data && r.image_data.length > 0;
-        console.log(`[PROJECT IMAGE] request for project ${projectId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
-            res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        if (r.image_url && r.image_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.image_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send file fallback:', sendErr);
-                    res.status(500).end();
-                }
-            });
-        }
-        return res.status(404).json({ error: 'Image not found' });
+        
+        connection.query(query, [projectId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching project image:', err);
+                return res.status(500).json({ error: 'Failed to load image' });
+            }
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Project not found' });
+            }
+            
+            const r = results[0];
+            const hasBlob = r.image_data && r.image_data.length > 0;
+            console.log(`[PROJECT IMAGE] request for project ${projectId} - hasBlob=${!!hasBlob} mimetype=${r.image_mimetype} url=${r.image_url}`);
+            
+            if (hasBlob) {
+                const buf = Buffer.isBuffer(r.image_data) ? r.image_data : Buffer.from(r.image_data);
+                res.setHeader('Content-Type', r.image_mimetype || 'image/jpeg');
+                res.setHeader('Content-Length', buf.length);
+                return res.send(buf);
+            }
+            if (r.image_url && r.image_url.startsWith('/images/')) {
+                const filePath = path.join(__dirname, r.image_url);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('Failed to send file fallback:', sendErr);
+                        res.status(500).end();
+                    }
+                });
+            }
+            return res.status(404).json({ error: 'Image not found' });
+        });
     });
 });
 
@@ -1998,40 +2098,52 @@ app.delete("/api/articles/:id", authenticateToken, requireRole("superadmin"), (r
 // Serve article file (PDF or other) from DB blob or filesystem path
 app.get('/api/articles/:id/file', (req, res) => {
     const articleId = req.params.id;
-    pool.query('SELECT article, article_mimetype, article_name, article_url FROM articles WHERE id = ?', [articleId], (err, results) => {
+    const query = 'SELECT article, article_mimetype, article_name, article_url FROM articles WHERE id = ?';
+    
+    pool.getConnection((err, connection) => {
         if (err) {
-            console.error('Error fetching article file:', err);
+            console.error('Error getting connection for article file:', err);
             return res.status(500).json({ error: 'Failed to load article file' });
         }
-        if (!results || results.length === 0) return res.status(404).json({ error: 'Article not found' });
-        const r = results[0];
-        const hasBlob = r.article && r.article.length > 0;
-        console.log(`[ARTICLE FILE] request for article ${articleId} - hasBlob=${!!hasBlob} mimetype=${r.article_mimetype} url=${r.article_url}`);
-        if (hasBlob) {
-            const buf = Buffer.isBuffer(r.article) ? r.article : Buffer.from(r.article);
-            // Debug logging for content served
-            try {
-                console.log(`[ARTICLE FILE] serving buffer: isBuffer=${Buffer.isBuffer(r.article)} length=${buf.length}`);
-            } catch (logErr) {
-                console.error('Error logging article buffer info:', logErr);
+        
+        connection.query(query, [articleId], (err, results) => {
+            connection.release(); // Release connection immediately after query
+            
+            if (err) {
+                console.error('Error fetching article file:', err);
+                return res.status(500).json({ error: 'Failed to load article file' });
             }
-            // Set headers for download with original filename if available
-            res.setHeader('Content-Type', r.article_mimetype || 'application/pdf');
-            if (r.article_name) res.setHeader('Content-Disposition', `attachment; filename="${r.article_name}"`);
-            res.setHeader('Content-Length', buf.length);
-            return res.send(buf);
-        }
-        // Fallback: if article_url points to a filesystem path
-        if (r.article_url && r.article_url.startsWith('/images/')) {
-            const filePath = path.join(__dirname, r.article_url);
-            return res.sendFile(filePath, (sendErr) => {
-                if (sendErr) {
-                    console.error('Failed to send article file fallback:', sendErr);
-                    res.status(500).end();
+            if (!results || results.length === 0) {
+                return res.status(404).json({ error: 'Article not found' });
+            }
+            
+            const r = results[0];
+            const hasBlob = r.article && r.article.length > 0;
+            console.log(`[ARTICLE FILE] request for article ${articleId} - hasBlob=${!!hasBlob} mimetype=${r.article_mimetype} url=${r.article_url}`);
+            
+            if (hasBlob) {
+                const buf = Buffer.isBuffer(r.article) ? r.article : Buffer.from(r.article);
+                try {
+                    console.log(`[ARTICLE FILE] serving buffer: isBuffer=${Buffer.isBuffer(r.article)} length=${buf.length}`);
+                } catch (logErr) {
+                    console.error('Error logging article buffer info:', logErr);
                 }
-            });
-        }
-        return res.status(404).json({ error: 'Article file not found' });
+                res.setHeader('Content-Type', r.article_mimetype || 'application/pdf');
+                if (r.article_name) res.setHeader('Content-Disposition', `attachment; filename="${r.article_name}"`);
+                res.setHeader('Content-Length', buf.length);
+                return res.send(buf);
+            }
+            if (r.article_url && r.article_url.startsWith('/images/')) {
+                const filePath = path.join(__dirname, r.article_url);
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        console.error('Failed to send article file fallback:', sendErr);
+                        res.status(500).end();
+                    }
+                });
+            }
+            return res.status(404).json({ error: 'Article file not found' });
+        });
     });
 });
 
