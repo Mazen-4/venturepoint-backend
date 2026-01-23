@@ -83,7 +83,10 @@ const pool = mysql.createPool({
     database: "venturepoint_db",
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelayMs: 30000,
+    idleTimeout: 60000
 });
 pool.getConnection((err, connection) => {
     if (err) {
@@ -2238,7 +2241,26 @@ app.use((req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: http://localhost:3000`);
 });
+
+// Graceful shutdown: close DB pool and server connections
+const gracefulShutdown = () => {
+    console.log('🛑 Shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ HTTP server closed');
+        pool.end((err) => {
+            if (err) {
+                console.error('❌ Error closing DB pool:', err);
+                process.exit(1);
+            }
+            console.log('✅ Database pool closed');
+            process.exit(0);
+        });
+    });
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
