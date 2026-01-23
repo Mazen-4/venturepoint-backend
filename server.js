@@ -466,6 +466,19 @@ app.get("/api/authors", (req, res) => {
     });
 });
 
+// Get textual content for partners page (single-row table `text_prtnrs`)
+app.get('/api/text_prtnrs', (req, res) => {
+    pool.query('SELECT * FROM text_prtnrs LIMIT 1', (err, results) => {
+        if (err) {
+            console.error('Error fetching text_prtnrs:', err);
+            return res.status(500).json({ error: 'Failed to fetch partners text' });
+        }
+        if (!results || results.length === 0) return res.json({ data: null });
+        // Return the single record (frontend will pick a suitable text field)
+        res.json({ data: results[0] });
+    });
+});
+
 // GET /api/advisors - Fetch all advisors
 app.get('/api/advisors', (req, res) => {
     console.log('Fetching advisors from database...');
